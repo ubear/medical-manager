@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import ReactEChartsCore from "echarts-for-react";
 import * as echarts from "echarts/core";
 import { LineChart, BarChart } from "echarts/charts";
@@ -9,14 +9,13 @@ import {
   TitleComponent,
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
-import {
-  queryRecords,
-  getMetrics,
-  getDepartments,
-} from "../lib/db";
+import { queryRecords, getMetrics, getDepartments } from "../lib/db";
+import { log } from "../lib/logger";
 import type { MetricDefinition, Department } from "../lib/types";
-import { TrendingUp, BarChart3 } from "lucide-react";
+import { TrendingUp, BarChart3, AreaChart, Download } from "lucide-react";
 import DatePicker from "./DatePicker";
+import { save } from "@tauri-apps/plugin-dialog";
+import { writeFile } from "@tauri-apps/plugin-fs";
 
 function daysAgo(n: number): Date {
   const d = new Date();
@@ -34,7 +33,13 @@ echarts.use([
   CanvasRenderer,
 ]);
 
-type ChartType = "line" | "bar";
+type ChartType = "line" | "bar" | "area";
+
+const PALETTE = [
+  "#3b82f6", "#10b981", "#f59e0b", "#8b5cf6",
+  "#ef4444", "#06b6d4", "#f97316", "#6366f1",
+  "#ec4899", "#84cc16", "#14b8a6", "#a855f7",
+];
 
 export default function TrendChart() {
   const [metrics, setMetrics] = useState<MetricDefinition[]>([]);
@@ -45,6 +50,31 @@ export default function TrendChart() {
   const [dateTo, setDateTo] = useState<Date>(() => new Date());
   const [chartType, setChartType] = useState<ChartType>("line");
   const [chartOption, setChartOption] = useState<echarts.EChartsCoreOption | null>(null);
+  const [hint, setHint] = useState("");
+  const [summary, setSummary] = useState<
+    { metric: string; unit: string; latest: number; avg: number; min: number; max: number }[]
+  >([]);
+  const chartRef = useRef<ReactEChartsCore>(null);
+
+  async function handleSaveChart() {
+    const instance = chartRef.current?.getEchartsInstance();
+    if (!instance) return;
+    const dataUrl = instance.getDataURL({
+      type: "png",
+      pixelRatio: 2,
+      backgroundColor: "#fff",
+    });
+    const base64 = dataUrl.split(",")[1];
+    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+    const path = await save({
+      defaultPath: `趋势图_${new Date().toISOString().slice(0, 10)}.png`,
+      filters: [{ name: "PNG", extensions: ["png"] }],
+    });
+    if (path) {
+      await writeFile(path, bytes);
+      log.info("TrendChart", `图表已保存: ${path}`);
+    }
+  }
 
   useEffect(() => {
     (async () => {
@@ -52,11 +82,20 @@ export default function TrendChart() {
       const d = await getDepartments();
       setMetrics(m);
       setDepartments(d);
+      if (m.length > 0 && d.length > 0) {
+        const defaultMetricIds = m.slice(0, 3).map((x) => x.id);
+        const defaultDeptNames = d.map((x) => x.name);
+        setSelectedMetrics(defaultMetricIds);
+        setSelectedDepts(defaultDeptNames);
+        // will auto-query via second useEffect
+      }
     })();
   }, []);
 
-  async function handleQuery() {
+  const doQuery = useCallback(async () => {
     if (selectedMetrics.length === 0 || selectedDepts.length === 0) return;
+    setHint("");
+
     const rows = await queryRecords({
       dateFrom: dateFrom?.toISOString().slice(0, 10),
       dateTo: dateTo?.toISOString().slice(0, 10),
@@ -64,13 +103,11 @@ export default function TrendChart() {
       metricIds: selectedMetrics,
     });
 
-    // Get all unique dates sorted
     const dateSet = new Set(rows.map((r) => r.date));
     const dates = Array.from(dateSet).sort();
-
     const metricMap = new Map(metrics.map((m) => [m.id, m]));
 
-    // Series: one per (metric, department) combo that has data
+    // Build series — keyed by "metric - department"
     const seriesMap = new Map<string, (number | null)[]>();
     for (const r of rows) {
       const m = metricMap.get(r.metric_id);
@@ -85,14 +122,61 @@ export default function TrendChart() {
       }
     }
 
+    const seriesEntries = Array.from(seriesMap.entries());
+    const series = seriesEntries.map(([name, data], i) => ({
+      name,
+      type: chartType === "area" ? "line" : chartType,
+      data,
+      smooth: chartType !== "bar",
+      symbol: chartType === "bar" ? "none" : "circle",
+      symbolSize: 4,
+      lineStyle: chartType !== "bar" ? { width: 2 } : undefined,
+      areaStyle:
+        chartType === "area" ? { opacity: 0.08 } : undefined,
+      color: PALETTE[i % PALETTE.length],
+    }));
+
+    // KPI summary: per-metric stats from all data
+    const summaryItems: typeof summary = [];
+    for (const mid of selectedMetrics) {
+      const m = metricMap.get(mid);
+      if (!m) continue;
+      const vals: number[] = [];
+      for (const r of rows) {
+        if (r.metric_id === mid && r.value != null) vals.push(r.value);
+      }
+      if (vals.length > 0) {
+        summaryItems.push({
+          metric: m.name,
+          unit: m.unit,
+          latest: vals[0],
+          avg: vals.reduce((s, v) => s + v, 0) / vals.length,
+          min: Math.min(...vals),
+          max: Math.max(...vals),
+        });
+      }
+    }
+    setSummary(summaryItems);
+
     const option: echarts.EChartsCoreOption = {
+      color: PALETTE,
       tooltip: {
         trigger: "axis",
+        backgroundColor: "#fff",
+        borderColor: "#e2e8f0",
+        borderWidth: 1,
+        textStyle: { color: "#334155", fontSize: 12 },
+        boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
         formatter: (params: unknown) => {
-          const p = params as { seriesName: string; value: number }[];
-          let html = `<div class="font-medium mb-1">${p[0].value}</div>`;
-          for (const item of p) {
-            html += `<div class="text-xs text-slate-500">${item.seriesName}: ${item.value}</div>`;
+          if (!Array.isArray(params)) return "";
+          const date = params[0]?.axisValue ?? "";
+          let html = `<div style="font-weight:600;margin-bottom:4px;color:#1e293b">${date}</div>`;
+          for (const item of params) {
+            html += `<div style="display:flex;align-items:center;gap:8px;font-size:12px">
+              <span style="width:8px;height:8px;border-radius:50%;background:${item.color};display:inline-block;flex-shrink:0"></span>
+              <span style="color:#64748b">${item.seriesName}</span>
+              <span style="font-weight:500;color:#1e293b;margin-left:auto">${item.value ?? "—"}</span>
+            </div>`;
           }
           return html;
         },
@@ -100,41 +184,63 @@ export default function TrendChart() {
       legend: {
         type: "scroll",
         bottom: 0,
-        textStyle: { fontSize: 12 },
+        textStyle: { fontSize: 11, color: "#64748b" },
+        pageIconColor: "#64748b",
+        pageTextStyle: { color: "#64748b" },
       },
-      grid: { top: 20, right: 20, bottom: 40, left: 50 },
+      grid: { top: 16, right: 24, bottom: 48, left: 56 },
       xAxis: {
         type: "category",
         data: dates,
-        axisLabel: { fontSize: 11 },
+        axisLine: { lineStyle: { color: "#e2e8f0" } },
+        axisTick: { show: false },
+        axisLabel: { fontSize: 11, color: "#94a3b8" },
       },
       yAxis: {
         type: "value",
-        axisLabel: { fontSize: 11 },
+        splitLine: { lineStyle: { color: "#f1f5f9", type: "dashed" } },
+        axisLabel: { fontSize: 11, color: "#94a3b8" },
       },
-      series: Array.from(seriesMap.entries()).map(([name, data]) => ({
-        name,
-        type: chartType,
-        data,
-        smooth: chartType === "line",
-        symbol: "circle",
-        symbolSize: 4,
-      })),
+      series,
     };
 
     setChartOption(option);
+  }, [selectedMetrics, selectedDepts, dateFrom, dateTo, chartType, metrics]);
+
+  // Auto-query when selections are ready
+  useEffect(() => {
+    if (selectedMetrics.length > 0 && selectedDepts.length > 0) {
+      doQuery();
+    }
+  }, [selectedMetrics, selectedDepts, dateFrom, dateTo, chartType, doQuery]);
+
+  function handleQuery() {
+    if (selectedMetrics.length === 0 && selectedDepts.length === 0) {
+      setHint("请至少选择一个指标和一个科室");
+      return;
+    }
+    if (selectedMetrics.length === 0) { setHint("请至少选择一个指标"); return; }
+    if (selectedDepts.length === 0) { setHint("请至少选择一个科室"); return; }
+    doQuery();
   }
 
   function toggleMetric(id: number) {
+    setHint("");
     setSelectedMetrics((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
     );
   }
 
   function toggleDept(dept: string) {
+    setHint("");
     setSelectedDepts((prev) =>
       prev.includes(dept) ? prev.filter((d) => d !== dept) : [...prev, dept],
     );
+  }
+
+  function fmt(n: number): string {
+    if (Number.isInteger(n)) return String(n);
+    return n.toFixed(1);
   }
 
   return (
@@ -142,34 +248,59 @@ export default function TrendChart() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-xl font-semibold text-slate-800">趋势图</h2>
-          <p className="text-sm text-slate-500 mt-1">选择指标和科室生成趋势图</p>
+          <p className="text-sm text-slate-500 mt-1">选择指标和科室，自动生成趋势图表</p>
         </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setChartType("line")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-              chartType === "line"
-                ? "bg-blue-100 text-blue-700"
-                : "bg-white text-slate-500 border border-slate-200 hover:bg-slate-50"
-            }`}
-          >
-            <TrendingUp className="w-4 h-4" /> 折线图
-          </button>
-          <button
-            onClick={() => setChartType("bar")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-              chartType === "bar"
-                ? "bg-blue-100 text-blue-700"
-                : "bg-white text-slate-500 border border-slate-200 hover:bg-slate-50"
-            }`}
-          >
-            <BarChart3 className="w-4 h-4" /> 柱状图
-          </button>
+        <div className="flex bg-slate-100 rounded-lg p-0.5">
+          {([
+            ["line", TrendingUp, "折线"],
+            ["bar", BarChart3, "柱状"],
+            ["area", AreaChart, "面积"],
+          ] as const).map(([type, Icon, label]) => (
+            <button
+              key={type}
+              onClick={() => setChartType(type)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                chartType === type
+                  ? "bg-white text-slate-800 shadow-sm"
+                  : "text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              {label}
+            </button>
+          ))}
         </div>
       </div>
 
+      {/* KPI summary cards */}
+      {summary.length > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+          {summary.map((s) => (
+            <div
+              key={s.metric}
+              className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm"
+            >
+              <p className="text-xs text-slate-500 mb-1 truncate">
+                {s.metric} ({s.unit})
+              </p>
+              <div className="flex items-baseline gap-2">
+                <span className="text-2xl font-semibold text-slate-800">
+                  {fmt(s.latest)}
+                </span>
+                <span className="text-xs text-slate-400">{s.unit}</span>
+              </div>
+              <div className="flex gap-3 mt-2 text-xs">
+                <span className="text-blue-600 font-medium">均 {fmt(s.avg)}</span>
+                <span className="text-amber-600 font-medium">低 {fmt(s.min)}</span>
+                <span className="text-emerald-600 font-medium">高 {fmt(s.max)}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Selectors */}
-      <div className="bg-white border border-slate-200 rounded-xl p-4 mb-6">
+      <div className="bg-white border border-slate-200 rounded-xl p-4 mb-6 shadow-sm">
         <div className="mb-3">
           <label className="block text-xs font-medium text-slate-600 mb-2">
             指标（可多选）
@@ -179,9 +310,9 @@ export default function TrendChart() {
               <button
                 key={m.id}
                 onClick={() => toggleMetric(m.id)}
-                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${
                   selectedMetrics.includes(m.id)
-                    ? "bg-blue-100 text-blue-700 border border-blue-200"
+                    ? "bg-blue-100 text-blue-700 border border-blue-200 shadow-sm"
                     : "bg-slate-100 text-slate-500 border border-slate-200 hover:bg-slate-200"
                 }`}
               >
@@ -224,34 +355,51 @@ export default function TrendChart() {
             <label className="block text-xs font-medium text-slate-600 mb-1.5">
               结束日期
             </label>
-            <DatePicker
-              value={dateTo}
-              onChange={setDateTo}
-              placeholder="不限"
-            />
+            <DatePicker value={dateTo} onChange={setDateTo} placeholder="不限" />
           </div>
-          <button
-            onClick={handleQuery}
-            className="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
-          >
-            生成图表
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleQuery}
+              className="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors shadow-sm"
+            >
+              生成图表
+            </button>
+            {hint && (
+              <span className="text-xs text-amber-600 animate-in fade-in">
+                {hint}
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Chart */}
       {chartOption ? (
-        <div className="bg-white border border-slate-200 rounded-xl p-4">
-          <ReactEChartsCore
-            echarts={echarts}
-            option={chartOption}
-            style={{ height: 420 }}
-            notMerge
-          />
+        <div className="bg-white border border-slate-200 rounded-xl shadow-sm">
+          <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+            <span className="text-xs font-semibold text-slate-500 uppercase">图表</span>
+            <button
+              onClick={handleSaveChart}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+            >
+              <Download className="w-3.5 h-3.5" />
+              保存图片
+            </button>
+          </div>
+          <div className="p-5">
+            <ReactEChartsCore
+              ref={chartRef}
+              echarts={echarts}
+              option={chartOption}
+              style={{ height: 440 }}
+              notMerge
+            />
+          </div>
         </div>
       ) : (
-        <div className="text-center text-slate-400 py-20 bg-white border border-slate-200 rounded-xl">
-          请选择指标和科室后点击"生成图表"
+        <div className="text-center py-20 bg-white border border-slate-200 rounded-xl">
+          <TrendingUp className="w-12 h-12 text-slate-200 mx-auto mb-4" />
+          <p className="text-sm text-slate-400">暂无数据，请检查筛选条件</p>
         </div>
       )}
     </div>

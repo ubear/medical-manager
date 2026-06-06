@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "医疗指标管理系统",
+  "productName": "MedicalManager",
   "version": "0.1.0",
   "identifier": "com.yyproject.medical-manager",
   "build": {

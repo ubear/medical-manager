@@ -1,7 +1,17 @@
 import Database from "@tauri-apps/plugin-sql";
 import type { MetricDefinition, RecordRow, Department } from "./types";
+import { log } from "./logger";
 
 const DB_PATH = "sqlite:medical.db";
+
+async function safeOp<T>(op: string, fn: () => Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    log.error("DB", `${op} 失败`, e);
+    return fallback;
+  }
+}
 
 let db: Database | null = null;
 let dbPromise: Promise<Database> | null = null;
@@ -48,23 +58,31 @@ export async function seedBuiltinMetrics(): Promise<void> {
 }
 
 export async function getMetrics(): Promise<MetricDefinition[]> {
-  const d = await getDb();
-  return await d.select<MetricDefinition[]>(
-    "SELECT * FROM metric_definitions ORDER BY is_builtin DESC, id ASC",
-  );
+  return safeOp("getMetrics", async () => {
+    const d = await getDb();
+    return await d.select<MetricDefinition[]>(
+      "SELECT * FROM metric_definitions ORDER BY is_builtin DESC, id ASC",
+    );
+  }, []);
 }
 
 export async function addCustomMetric(
   name: string,
   unit: string,
 ): Promise<void> {
-  await withLock(async () => {
-    const d = await getDb();
-    await d.execute(
-      "INSERT INTO metric_definitions (name, unit, is_builtin) VALUES ($1, $2, 0)",
-      [name, unit],
-    );
-  });
+  try {
+    await withLock(async () => {
+      const d = await getDb();
+      await d.execute(
+        "INSERT INTO metric_definitions (name, unit, is_builtin) VALUES ($1, $2, 0)",
+        [name, unit],
+      );
+    });
+    log.info("DB", `addCustomMetric: ${name}`);
+  } catch (e) {
+    log.error("DB", `addCustomMetric 失败: ${name}`, e);
+    throw e;
+  }
 }
 
 export async function deleteCustomMetric(id: number): Promise<void> {
@@ -80,27 +98,33 @@ export async function deleteCustomMetric(id: number): Promise<void> {
 export async function saveRecords(
   records: { date: string; department: string; metric_id: number; value: number | null }[],
 ): Promise<void> {
-  await withLock(async () => {
-    const d = await getDb();
-    for (const r of records) {
-      if (r.value === null || r.value === undefined) continue;
-      const existing = await d.select<{ id: number }[]>(
-        "SELECT id FROM records WHERE date = $1 AND department = $2 AND metric_id = $3",
-        [r.date, r.department, r.metric_id],
-      );
-      if (existing.length > 0) {
-        await d.execute(
-          "UPDATE records SET value = $1 WHERE id = $2",
-          [r.value, existing[0].id],
+  const valid = records.filter((r) => r.value != null);
+  try {
+    await withLock(async () => {
+      const d = await getDb();
+      for (const r of valid) {
+        const existing = await d.select<{ id: number }[]>(
+          "SELECT id FROM records WHERE date = $1 AND department = $2 AND metric_id = $3",
+          [r.date, r.department, r.metric_id],
         );
-      } else {
-        await d.execute(
-          "INSERT INTO records (date, department, metric_id, value) VALUES ($1, $2, $3, $4)",
-          [r.date, r.department, r.metric_id, r.value],
-        );
+        if (existing.length > 0) {
+          await d.execute(
+            "UPDATE records SET value = $1 WHERE id = $2",
+            [r.value, existing[0].id],
+          );
+        } else {
+          await d.execute(
+            "INSERT INTO records (date, department, metric_id, value) VALUES ($1, $2, $3, $4)",
+            [r.date, r.department, r.metric_id, r.value],
+          );
+        }
       }
-    }
-  });
+    });
+    log.info("DB", `saveRecords: 保存 ${valid.length} 条记录`);
+  } catch (e) {
+    log.error("DB", `saveRecords 失败 (${valid.length} 条)`, e);
+    throw e;
+  }
 }
 
 export async function queryRecords(params: {
@@ -109,6 +133,7 @@ export async function queryRecords(params: {
   departments?: string[];
   metricIds?: number[];
 }): Promise<RecordRow[]> {
+  return safeOp("queryRecords", async () => {
   const d = await getDb();
   const conditions: string[] = [];
   const bindings: (string | number)[] = [];
@@ -147,6 +172,7 @@ export async function queryRecords(params: {
     ORDER BY r.date DESC, r.department, m.id
   `;
   return await d.select<RecordRow[]>(sql, bindings);
+  }, []);
 }
 
 export async function importFromCsv(
@@ -348,5 +374,6 @@ export async function importFromXlsx(
     }
   });
 
+  log.info("DB", `importFromXlsx: 导入 ${imported} 条，新科室 ${newDepts.length} 个`);
   return { imported, newDepts };
 }

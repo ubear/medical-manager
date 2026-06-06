@@ -115,8 +115,8 @@ export default function MetricConfig() {
                 key={m.id}
                 className="border-b border-slate-50 hover:bg-slate-50/50"
               >
-                <td className="px-5 py-3 text-sm text-slate-700">{m.name}</td>
-                <td className="px-5 py-3 text-sm text-slate-500">{m.unit}</td>
+                <td className="px-5 py-3 text-sm text-slate-800 font-medium">{m.name}</td>
+                <td className="px-5 py-3 text-sm text-slate-600">{m.unit}</td>
                 <td className="px-5 py-3">
                   {m.is_builtin ? (
                     <span className="inline-flex items-center gap-1 text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">

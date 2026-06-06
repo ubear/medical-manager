@@ -6,9 +6,12 @@ import {
   importFromXlsx,
 } from "../lib/db";
 import type { MetricDefinition, Department } from "../lib/types";
-import { Save, Check, Upload, FileSpreadsheet } from "lucide-react";
+import { log } from "../lib/logger";
+import { Save, Check, Upload, FileSpreadsheet, RotateCcw } from "lucide-react";
 import DatePicker from "./DatePicker";
 import * as XLSX from "xlsx";
+
+const INTEGER_UNITS = new Set(["台", "次"]);
 
 export default function DataEntry() {
   const [metrics, setMetrics] = useState<MetricDefinition[]>([]);
@@ -16,6 +19,7 @@ export default function DataEntry() {
   const [date, setDate] = useState<Date>(new Date());
   const [department, setDepartment] = useState("");
   const [values, setValues] = useState<Record<number, string>>({});
+  const [errors, setErrors] = useState<Record<number, string>>({});
   const [saved, setSaved] = useState(false);
   const [importMsg, setImportMsg] = useState<string | null>(null);
 
@@ -28,13 +32,29 @@ export default function DataEntry() {
     })();
   }, []);
 
+  function validate(metricId: number, val: string): string {
+    if (val === "" || val === undefined) return "";
+    const num = Number(val);
+    if (isNaN(num)) return "请输入数字";
+    const metric = metrics.find((m) => m.id === metricId);
+    if (metric && INTEGER_UNITS.has(metric.unit) && !Number.isInteger(num)) {
+      return "请输入整数";
+    }
+    return "";
+  }
+
   function handleValueChange(metricId: number, val: string) {
     setValues((prev) => ({ ...prev, [metricId]: val }));
+    setErrors((prev) => ({ ...prev, [metricId]: validate(metricId, val) }));
     setSaved(false);
   }
 
   async function handleSubmit() {
     if (!date || !department) return;
+    // Check for errors
+    const hasErrors = Object.values(errors).some((e) => e !== "");
+    if (hasErrors) return;
+
     const records = metrics.map((m) => ({
       date: date.toISOString().slice(0, 10),
       department,
@@ -45,8 +65,17 @@ export default function DataEntry() {
           : null,
     }));
     await saveRecords(records);
+    log.info("DataEntry", `提交: ${department} ${date.toISOString().slice(0,10)}, ${records.filter(r=>r.value!=null).length} 项`);
+    setValues({});
+    setErrors({});
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+  }
+
+  function handleClear() {
+    setValues({});
+    setErrors({});
+    setSaved(false);
   }
 
   async function handleXlsxImport(e: React.ChangeEvent<HTMLInputElement>) {
@@ -63,6 +92,7 @@ export default function DataEntry() {
       return;
     }
 
+    log.info("DataEntry", `开始 XLSX 导入: ${rows.length} 行`);
     const result = await importFromXlsx(rows);
     setImportMsg(
       `导入 ${result.imported} 条记录` +
@@ -76,13 +106,15 @@ export default function DataEntry() {
     e.target.value = "";
   }
 
+  const hasAnyError = Object.values(errors).some((e) => e !== "");
+
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-xl font-semibold text-slate-800">数据录入</h2>
           <p className="text-sm text-slate-500 mt-1">
-            选择日期和科室，填入指标数值
+            选择日期和科室，填入指标数值（可留空）
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -98,7 +130,7 @@ export default function DataEntry() {
           </label>
           <button
             onClick={handleSubmit}
-            disabled={!date || !department}
+            disabled={!date || !department || hasAnyError}
             className={`flex items-center gap-1.5 px-5 py-2 rounded-lg text-sm font-medium transition-all shadow-sm ${
               saved
                 ? "bg-emerald-600 text-white shadow-emerald-600/20"
@@ -115,6 +147,13 @@ export default function DataEntry() {
               </>
             )}
           </button>
+          <button
+            onClick={handleClear}
+            className="flex items-center gap-1.5 px-3 py-2 text-sm text-slate-500 hover:text-slate-700 transition-colors"
+          >
+            <RotateCcw className="w-4 h-4" />
+            清空
+          </button>
         </div>
       </div>
 
@@ -124,13 +163,11 @@ export default function DataEntry() {
         </div>
       )}
 
-      {/* XLSX format hint — always visible */}
-      <div className="mb-4 px-4 py-2.5 bg-blue-50 border border-blue-100 rounded-lg text-xs text-slate-500 flex items-start gap-2">
+      <div className="mb-4 px-4 py-2.5 bg-blue-50 border border-blue-100 rounded-lg text-xs text-slate-600 flex items-start gap-2">
         <FileSpreadsheet className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
         <span>
-          XLSX 第一行为表头，需包含 <b className="text-slate-700">日期</b> 和 <b className="text-slate-700">科室</b> 列。
-          其余列名与指标名称一致。未知科室将自动添加。
-          可从「数据分析」导出 Excel 直接修改后导入。
+          XLSX 第一行为表头，需包含 <b className="text-slate-800">日期</b> 和{" "}
+          <b className="text-slate-800">科室</b> 列。其余列名与指标名称一致。未知科室将自动添加。
         </span>
       </div>
 
@@ -166,46 +203,64 @@ export default function DataEntry() {
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
         <table className="w-full">
           <thead>
-            <tr className="border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white">
-              <th className="text-left px-5 py-3.5 text-xs font-medium text-slate-500 uppercase w-12">
+            <tr className="border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white">
+              <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase w-12">
                 #
               </th>
-              <th className="text-left px-5 py-3.5 text-xs font-medium text-slate-500 uppercase">
+              <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase">
                 指标名称
               </th>
-              <th className="text-left px-5 py-3.5 text-xs font-medium text-slate-500 uppercase">
+              <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase">
                 数值
               </th>
-              <th className="text-left px-5 py-3.5 text-xs font-medium text-slate-500 uppercase">
+              <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase">
                 单位
               </th>
             </tr>
           </thead>
           <tbody>
-            {metrics.map((m, i) => (
-              <tr
-                key={m.id}
-                className="border-b border-slate-50 hover:bg-blue-50/30 transition-colors"
-              >
-                <td className="px-5 py-3 text-xs text-slate-400">{i + 1}</td>
-                <td className="px-5 py-3 text-sm text-slate-700 font-medium">
-                  {m.name}
-                </td>
-                <td className="px-5 py-3">
-                  <input
-                    type="number"
-                    step="any"
-                    value={values[m.id] ?? ""}
-                    onChange={(e) => handleValueChange(m.id, e.target.value)}
-                    placeholder="—"
-                    className="w-36 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-400 transition-all"
-                  />
-                </td>
-                <td className="px-5 py-3 text-sm text-slate-400">{m.unit}</td>
-              </tr>
-            ))}
+            {metrics.map((m, i) => {
+              const isInt = INTEGER_UNITS.has(m.unit);
+              const err = errors[m.id];
+              return (
+                <tr
+                  key={m.id}
+                  className="border-b border-slate-100 hover:bg-blue-50/30 transition-colors"
+                >
+                  <td className="px-5 py-3 text-xs text-slate-400">{i + 1}</td>
+                  <td className="px-5 py-3 text-sm text-slate-800 font-medium">
+                    {m.name}
+                  </td>
+                  <td className="px-5 py-3">
+                    <div className="relative">
+                      <input
+                        type="number"
+                        step={isInt ? "1" : "0.1"}
+                        value={values[m.id] ?? ""}
+                        onChange={(e) => handleValueChange(m.id, e.target.value)}
+                        placeholder="留空则跳过"
+                        className={`w-36 px-3 py-2 border rounded-lg text-sm transition-all focus:outline-none focus:ring-2 placeholder:text-slate-300 ${
+                          err
+                            ? "border-red-300 focus:ring-red-500/30 focus:border-red-400 bg-red-50/30"
+                            : "border-slate-200 focus:ring-blue-500/50 focus:border-blue-400"
+                        }`}
+                      />
+                      {err && (
+                        <p className="text-xs text-red-500 mt-0.5 absolute -bottom-4 left-0 whitespace-nowrap">
+                          {err}
+                        </p>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-5 py-3 text-sm text-slate-800">{m.unit}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
+        <div className="px-5 py-2.5 border-t border-slate-100 text-xs text-slate-400">
+          未填写的指标将跳过，不保存。有错误提示的指标修正后再提交。
+        </div>
       </div>
     </div>
   );
