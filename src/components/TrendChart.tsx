@@ -16,6 +16,13 @@ import {
 } from "../lib/db";
 import type { MetricDefinition, Department } from "../lib/types";
 import { TrendingUp, BarChart3 } from "lucide-react";
+import DatePicker from "./DatePicker";
+
+function daysAgo(n: number): Date {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d;
+}
 
 echarts.use([
   LineChart,
@@ -34,8 +41,8 @@ export default function TrendChart() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [selectedMetrics, setSelectedMetrics] = useState<number[]>([]);
   const [selectedDepts, setSelectedDepts] = useState<string[]>([]);
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const [dateFrom, setDateFrom] = useState<Date>(() => daysAgo(7));
+  const [dateTo, setDateTo] = useState<Date>(() => new Date());
   const [chartType, setChartType] = useState<ChartType>("line");
   const [chartOption, setChartOption] = useState<echarts.EChartsCoreOption | null>(null);
 
@@ -51,8 +58,8 @@ export default function TrendChart() {
   async function handleQuery() {
     if (selectedMetrics.length === 0 || selectedDepts.length === 0) return;
     const rows = await queryRecords({
-      dateFrom: dateFrom || undefined,
-      dateTo: dateTo || undefined,
+      dateFrom: dateFrom?.toISOString().slice(0, 10),
+      dateTo: dateTo?.toISOString().slice(0, 10),
       departments: selectedDepts,
       metricIds: selectedMetrics,
     });
@@ -208,25 +215,19 @@ export default function TrendChart() {
         </div>
         <div className="flex items-end gap-4">
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">
+            <label className="block text-xs font-medium text-slate-600 mb-1.5">
               起始日期
             </label>
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+            <DatePicker value={dateFrom} onChange={setDateFrom} />
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">
+            <label className="block text-xs font-medium text-slate-600 mb-1.5">
               结束日期
             </label>
-            <input
-              type="date"
+            <DatePicker
               value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              onChange={setDateTo}
+              placeholder="不限"
             />
           </div>
           <button

@@ -2,14 +2,21 @@ import { useEffect, useState, useMemo } from "react";
 import { queryRecords, getMetrics, getDepartments } from "../lib/db";
 import type { MetricDefinition, RecordRow, Department } from "../lib/types";
 import { Download, Search, RotateCcw } from "lucide-react";
+import DatePicker from "./DatePicker";
 import * as XLSX from "xlsx";
+
+function daysAgo(n: number): Date {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d;
+}
 
 export default function DataAnalysis() {
   const [records, setRecords] = useState<RecordRow[]>([]);
   const [metrics, setMetrics] = useState<MetricDefinition[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const [dateFrom, setDateFrom] = useState<Date>(() => daysAgo(7));
+  const [dateTo, setDateTo] = useState<Date>(() => new Date());
   const [selectedDepts, setSelectedDepts] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -25,8 +32,8 @@ export default function DataAnalysis() {
   async function handleSearch() {
     setLoading(true);
     const rows = await queryRecords({
-      dateFrom: dateFrom || undefined,
-      dateTo: dateTo || undefined,
+      dateFrom: dateFrom?.toISOString().slice(0, 10),
+      dateTo: dateTo?.toISOString().slice(0, 10),
       departments: selectedDepts.length > 0 ? selectedDepts : undefined,
     });
     setRecords(rows);
@@ -34,8 +41,8 @@ export default function DataAnalysis() {
   }
 
   async function handleReset() {
-    setDateFrom("");
-    setDateTo("");
+    setDateFrom(daysAgo(7));
+    setDateTo(new Date());
     setSelectedDepts([]);
     setRecords([]);
   }
@@ -89,28 +96,22 @@ export default function DataAnalysis() {
       </div>
 
       {/* Filters */}
-      <div className="bg-white border border-slate-200 rounded-xl p-4 mb-6">
+      <div className="bg-white border border-slate-200 rounded-xl p-4 mb-6 shadow-sm">
         <div className="flex flex-wrap items-end gap-4 mb-3">
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">
+            <label className="block text-xs font-medium text-slate-600 mb-1.5">
               起始日期
             </label>
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+            <DatePicker value={dateFrom} onChange={setDateFrom} />
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">
+            <label className="block text-xs font-medium text-slate-600 mb-1.5">
               结束日期
             </label>
-            <input
-              type="date"
+            <DatePicker
               value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              onChange={setDateTo}
+              placeholder="不限"
             />
           </div>
           <button

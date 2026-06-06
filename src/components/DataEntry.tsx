@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import {
   getMetrics,
   saveRecords,
@@ -6,9 +6,8 @@ import {
   importFromXlsx,
 } from "../lib/db";
 import type { MetricDefinition, Department } from "../lib/types";
-import { Save, Check, Upload, Calendar } from "lucide-react";
-import { DayPicker } from "react-day-picker";
-import "react-day-picker/style.css";
+import { Save, Check, Upload, FileSpreadsheet } from "lucide-react";
+import DatePicker from "./DatePicker";
 import * as XLSX from "xlsx";
 
 export default function DataEntry() {
@@ -18,9 +17,7 @@ export default function DataEntry() {
   const [department, setDepartment] = useState("");
   const [values, setValues] = useState<Record<number, string>>({});
   const [saved, setSaved] = useState(false);
-  const [showCalendar, setShowCalendar] = useState(false);
   const [importMsg, setImportMsg] = useState<string | null>(null);
-  const calendarRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     (async () => {
@@ -29,16 +26,6 @@ export default function DataEntry() {
       setMetrics(m);
       setDepartments(d);
     })();
-  }, []);
-
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (calendarRef.current && !calendarRef.current.contains(e.target as Node)) {
-        setShowCalendar(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
   function handleValueChange(metricId: number, val: string) {
@@ -89,8 +76,6 @@ export default function DataEntry() {
     e.target.value = "";
   }
 
-  const ds = date.toISOString().slice(0, 10);
-
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
@@ -139,48 +124,23 @@ export default function DataEntry() {
         </div>
       )}
 
-      <div className="flex gap-5 mb-6">
-        {/* Date picker */}
-        <div className="relative" ref={calendarRef}>
-          <label className="block text-xs font-medium text-slate-600 mb-1.5">
-            日期
-          </label>
-          <button
-            onClick={() => setShowCalendar(!showCalendar)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-700 hover:border-blue-300 transition-all shadow-sm min-w-[160px]"
-          >
-            <Calendar className="w-4 h-4 text-slate-400" />
-            {ds}
-          </button>
-          {showCalendar && (
-            <div className="absolute top-full mt-2 z-50 bg-white rounded-xl shadow-xl border border-slate-200 p-2 animate-in fade-in zoom-in-95">
-              <DayPicker
-                mode="single"
-                selected={date}
-                onSelect={(d) => {
-                  if (d) {
-                    setDate(d);
-                    setSaved(false);
-                  }
-                  setShowCalendar(false);
-                }}
-                footer={
-                  <button
-                    onClick={() => {
-                      setDate(new Date());
-                      setShowCalendar(false);
-                    }}
-                    className="mt-2 text-xs text-blue-600 hover:text-blue-700"
-                  >
-                    回到今天
-                  </button>
-                }
-              />
-            </div>
-          )}
-        </div>
+      {/* XLSX format hint — always visible */}
+      <div className="mb-4 px-4 py-2.5 bg-blue-50 border border-blue-100 rounded-lg text-xs text-slate-500 flex items-start gap-2">
+        <FileSpreadsheet className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
+        <span>
+          XLSX 第一行为表头，需包含 <b className="text-slate-700">日期</b> 和 <b className="text-slate-700">科室</b> 列。
+          其余列名与指标名称一致。未知科室将自动添加。
+          可从「数据分析」导出 Excel 直接修改后导入。
+        </span>
+      </div>
 
-        {/* Department select */}
+      <div className="flex gap-5 mb-6">
+        <DatePicker
+          label="日期"
+          value={date}
+          onChange={(d) => { setDate(d); setSaved(false); }}
+        />
+
         <div className="flex-1 max-w-xs">
           <label className="block text-xs font-medium text-slate-600 mb-1.5">
             科室
@@ -203,7 +163,6 @@ export default function DataEntry() {
         </div>
       </div>
 
-      {/* Metrics table */}
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
         <table className="w-full">
           <thead>
