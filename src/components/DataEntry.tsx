@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getMetrics, saveRecords, seedBuiltinMetrics } from "../lib/db";
+import { getMetrics, saveRecords } from "../lib/db";
 import type { MetricDefinition } from "../lib/types";
 import { Save, Check, Upload } from "lucide-react";
 import { importFromCsv } from "../lib/db";
@@ -16,7 +16,6 @@ export default function DataEntry() {
 
   useEffect(() => {
     (async () => {
-      await seedBuiltinMetrics();
       const m = await getMetrics();
       setMetrics(m);
     })();

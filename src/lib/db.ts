@@ -4,12 +4,26 @@ import type { MetricDefinition, RecordRow } from "./types";
 const DB_PATH = "sqlite:medical.db";
 
 let db: Database | null = null;
+let dbPromise: Promise<Database> | null = null;
+let writeLock: Promise<void> | null = null;
 
 async function getDb(): Promise<Database> {
-  if (!db) {
-    db = await Database.load(DB_PATH);
-  }
-  return db;
+  if (db) return db;
+  if (dbPromise) return dbPromise;
+  dbPromise = Database.load(DB_PATH).then((d) => {
+    db = d;
+    return d;
+  });
+  return dbPromise;
+}
+
+function withLock<T>(fn: () => Promise<T>): Promise<T> {
+  const prev = writeLock ?? Promise.resolve();
+  let release: () => void;
+  writeLock = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return prev.then(fn).finally(() => release!());
 }
 
 const BUILTIN_METRICS: { name: string; unit: string }[] = [
@@ -44,44 +58,49 @@ export async function addCustomMetric(
   name: string,
   unit: string,
 ): Promise<void> {
-  const d = await getDb();
-  await d.execute(
-    "INSERT INTO metric_definitions (name, unit, is_builtin) VALUES ($1, $2, 0)",
-    [name, unit],
-  );
+  await withLock(async () => {
+    const d = await getDb();
+    await d.execute(
+      "INSERT INTO metric_definitions (name, unit, is_builtin) VALUES ($1, $2, 0)",
+      [name, unit],
+    );
+  });
 }
 
 export async function deleteCustomMetric(id: number): Promise<void> {
-  const d = await getDb();
-  await d.execute("DELETE FROM metric_definitions WHERE id = $1 AND is_builtin = 0", [
-    id,
-  ]);
-  await d.execute("DELETE FROM records WHERE metric_id = $1", [id]);
+  await withLock(async () => {
+    const d = await getDb();
+    await d.execute("DELETE FROM metric_definitions WHERE id = $1 AND is_builtin = 0", [
+      id,
+    ]);
+    await d.execute("DELETE FROM records WHERE metric_id = $1", [id]);
+  });
 }
 
 export async function saveRecords(
   records: { date: string; department: string; metric_id: number; value: number | null }[],
 ): Promise<void> {
-  const d = await getDb();
-  for (const r of records) {
-    if (r.value === null || r.value === undefined) continue;
-    // Upsert: update existing or insert new
-    const existing = await d.select<{ id: number }[]>(
-      "SELECT id FROM records WHERE date = $1 AND department = $2 AND metric_id = $3",
-      [r.date, r.department, r.metric_id],
-    );
-    if (existing.length > 0) {
-      await d.execute(
-        "UPDATE records SET value = $1 WHERE id = $2",
-        [r.value, existing[0].id],
+  await withLock(async () => {
+    const d = await getDb();
+    for (const r of records) {
+      if (r.value === null || r.value === undefined) continue;
+      const existing = await d.select<{ id: number }[]>(
+        "SELECT id FROM records WHERE date = $1 AND department = $2 AND metric_id = $3",
+        [r.date, r.department, r.metric_id],
       );
-    } else {
-      await d.execute(
-        "INSERT INTO records (date, department, metric_id, value) VALUES ($1, $2, $3, $4)",
-        [r.date, r.department, r.metric_id, r.value],
-      );
+      if (existing.length > 0) {
+        await d.execute(
+          "UPDATE records SET value = $1 WHERE id = $2",
+          [r.value, existing[0].id],
+        );
+      } else {
+        await d.execute(
+          "INSERT INTO records (date, department, metric_id, value) VALUES ($1, $2, $3, $4)",
+          [r.date, r.department, r.metric_id, r.value],
+        );
+      }
     }
-  }
+  });
 }
 
 export async function queryRecords(params: {
@@ -141,20 +160,78 @@ export async function getDepartments(): Promise<string[]> {
 export async function importFromCsv(
   rows: { date: string; department: string; metric_name: string; value: number }[],
 ): Promise<void> {
+  await withLock(async () => {
+    const d = await getDb();
+    for (const row of rows) {
+      const metrics = await d.select<{ id: number }[]>(
+        "SELECT id FROM metric_definitions WHERE name = $1",
+        [row.metric_name],
+      );
+      if (metrics.length === 0) continue;
+      const existing = await d.select<{ id: number }[]>(
+        "SELECT id FROM records WHERE date = $1 AND department = $2 AND metric_id = $3",
+        [row.date, row.department, metrics[0].id],
+      );
+      if (existing.length > 0) {
+        await d.execute(
+          "UPDATE records SET value = $1 WHERE id = $2",
+          [row.value, existing[0].id],
+        );
+      } else {
+        await d.execute(
+          "INSERT INTO records (date, department, metric_id, value) VALUES ($1, $2, $3, $4)",
+          [row.date, row.department, metrics[0].id, row.value],
+        );
+      }
+    }
+  });
+}
+
+export async function seedMockData(): Promise<void> {
+  await seedBuiltinMetrics();
   const d = await getDb();
-  for (const row of rows) {
-    const metrics = await d.select<{ id: number }[]>(
-      "SELECT id FROM metric_definitions WHERE name = $1",
-      [row.metric_name],
-    );
-    if (metrics.length === 0) continue;
-    await saveRecords([
-      {
-        date: row.date,
-        department: row.department,
-        metric_id: metrics[0].id,
-        value: row.value,
-      },
-    ]);
+  const count = await d.select<{ count: number }[]>(
+    "SELECT COUNT(*) as count FROM records",
+  );
+  if (count[0].count > 0) return;
+
+  const departments = ["心内科", "骨科", "普外科"];
+  const days = 30;
+  const now = new Date();
+
+  // Batch all inserts in a single write
+  for (const dept of departments) {
+    for (let i = days; i >= 0; i--) {
+      const date = new Date(now);
+      date.setDate(date.getDate() - i);
+      const ds = date.toISOString().slice(0, 10);
+
+      const base = dept === "心内科" ? 80 : dept === "骨科" ? 60 : 45;
+      const noise = () => Math.round((Math.random() - 0.5) * 20);
+
+      const values: Record<string, number | null> = {
+        "手术量": base + noise(),
+        "手术占比": 75 + Math.round((Math.random() - 0.5) * 15),
+        "四级手术占比": 25 + Math.round(Math.random() * 20),
+        "微创手术占比": 40 + Math.round(Math.random() * 25),
+        "并发症发生率": +(Math.random() * 3 + 1).toFixed(1),
+        "平均住院日": +(Math.random() * 3 + 5).toFixed(1),
+        "病床周转次数": +(Math.random() * 2 + 2.5).toFixed(1),
+        "病历返修率": +(Math.random() * 8 + 3).toFixed(1),
+      };
+
+      for (const [name, val] of Object.entries(values)) {
+        if (val === null) continue;
+        const metrics = await d.select<{ id: number }[]>(
+          "SELECT id FROM metric_definitions WHERE name = $1",
+          [name],
+        );
+        if (metrics.length === 0) continue;
+        await d.execute(
+          "INSERT INTO records (date, department, metric_id, value) VALUES ($1, $2, $3, $4)",
+          [ds, dept, metrics[0].id, val],
+        );
+      }
+    }
   }
 }

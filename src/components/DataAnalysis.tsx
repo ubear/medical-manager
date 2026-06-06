@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from "react";
-import { queryRecords, getMetrics, getDepartments, seedBuiltinMetrics } from "../lib/db";
+import { queryRecords, getMetrics, getDepartments } from "../lib/db";
 import type { MetricDefinition, RecordRow } from "../lib/types";
 import { Download, Search, RotateCcw } from "lucide-react";
 import * as XLSX from "xlsx";
@@ -15,7 +15,6 @@ export default function DataAnalysis() {
 
   useEffect(() => {
     (async () => {
-      await seedBuiltinMetrics();
       const m = await getMetrics();
       const d = await getDepartments();
       setMetrics(m);

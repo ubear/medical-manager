@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import ReactEChartsCore from "echarts-for-react/lib/core";
+import ReactEChartsCore from "echarts-for-react";
 import * as echarts from "echarts/core";
 import { LineChart, BarChart } from "echarts/charts";
 import {
@@ -13,7 +13,6 @@ import {
   queryRecords,
   getMetrics,
   getDepartments,
-  seedBuiltinMetrics,
 } from "../lib/db";
 import type { MetricDefinition } from "../lib/types";
 import { TrendingUp, BarChart3 } from "lucide-react";
@@ -42,7 +41,6 @@ export default function TrendChart() {
 
   useEffect(() => {
     (async () => {
-      await seedBuiltinMetrics();
       const m = await getMetrics();
       const d = await getDepartments();
       setMetrics(m);

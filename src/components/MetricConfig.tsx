@@ -3,7 +3,6 @@ import {
   getMetrics,
   addCustomMetric,
   deleteCustomMetric,
-  seedBuiltinMetrics,
 } from "../lib/db";
 import type { MetricDefinition } from "../lib/types";
 import { Plus, Trash2, Lock } from "lucide-react";
@@ -15,7 +14,6 @@ export default function MetricConfig() {
   const [showForm, setShowForm] = useState(false);
 
   async function load() {
-    await seedBuiltinMetrics();
     const m = await getMetrics();
     setMetrics(m);
   }
