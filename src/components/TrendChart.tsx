@@ -14,7 +14,7 @@ import {
   getMetrics,
   getDepartments,
 } from "../lib/db";
-import type { MetricDefinition } from "../lib/types";
+import type { MetricDefinition, Department } from "../lib/types";
 import { TrendingUp, BarChart3 } from "lucide-react";
 
 echarts.use([
@@ -31,7 +31,7 @@ type ChartType = "line" | "bar";
 
 export default function TrendChart() {
   const [metrics, setMetrics] = useState<MetricDefinition[]>([]);
-  const [departments, setDepartments] = useState<string[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [selectedMetrics, setSelectedMetrics] = useState<number[]>([]);
   const [selectedDepts, setSelectedDepts] = useState<string[]>([]);
   const [dateFrom, setDateFrom] = useState("");
@@ -190,15 +190,15 @@ export default function TrendChart() {
           <div className="flex flex-wrap gap-2">
             {departments.map((d) => (
               <button
-                key={d}
-                onClick={() => toggleDept(d)}
-                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-                  selectedDepts.includes(d)
-                    ? "bg-emerald-100 text-emerald-700 border border-emerald-200"
+                key={d.id}
+                onClick={() => toggleDept(d.name)}
+                className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${
+                  selectedDepts.includes(d.name)
+                    ? "bg-emerald-100 text-emerald-700 border border-emerald-200 shadow-sm"
                     : "bg-slate-100 text-slate-500 border border-slate-200 hover:bg-slate-200"
                 }`}
               >
-                {d}
+                {d.name}
               </button>
             ))}
             {departments.length === 0 && (

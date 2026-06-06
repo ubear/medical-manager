@@ -29,3 +29,9 @@ export type ChartDataPoint = {
   date: string;
   [metricKey: string]: string | number | null;
 };
+
+export interface Department {
+  id: number;
+  name: string;
+  created_at: string;
+}

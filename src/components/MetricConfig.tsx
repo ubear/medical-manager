@@ -53,7 +53,7 @@ export default function MetricConfig() {
       </div>
 
       {showForm && (
-        <div className="mb-6 p-4 bg-white border border-slate-200 rounded-xl flex items-end gap-3">
+        <div className="mb-6 p-4 bg-white border border-slate-200 rounded-xl shadow-sm flex items-end gap-3">
           <div className="flex-1">
             <label className="block text-xs font-medium text-slate-600 mb-1">
               指标名称
@@ -91,7 +91,7 @@ export default function MetricConfig() {
         </div>
       )}
 
-      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
         <table className="w-full">
           <thead>
             <tr className="border-b border-slate-100 bg-slate-50">

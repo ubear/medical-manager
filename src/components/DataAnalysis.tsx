@@ -1,13 +1,13 @@
 import { useEffect, useState, useMemo } from "react";
 import { queryRecords, getMetrics, getDepartments } from "../lib/db";
-import type { MetricDefinition, RecordRow } from "../lib/types";
+import type { MetricDefinition, RecordRow, Department } from "../lib/types";
 import { Download, Search, RotateCcw } from "lucide-react";
 import * as XLSX from "xlsx";
 
 export default function DataAnalysis() {
   const [records, setRecords] = useState<RecordRow[]>([]);
   const [metrics, setMetrics] = useState<MetricDefinition[]>([]);
-  const [departments, setDepartments] = useState<string[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [selectedDepts, setSelectedDepts] = useState<string[]>([]);
@@ -57,9 +57,9 @@ export default function DataAnalysis() {
     });
   }, [records]);
 
-  function toggleDept(dept: string) {
+  function toggleDept(name: string) {
     setSelectedDepts((prev) =>
-      prev.includes(dept) ? prev.filter((d) => d !== dept) : [...prev, dept],
+      prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name],
     );
   }
 
@@ -132,15 +132,15 @@ export default function DataAnalysis() {
           <div className="flex flex-wrap gap-2">
             {departments.map((d) => (
               <button
-                key={d}
-                onClick={() => toggleDept(d)}
-                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-                  selectedDepts.includes(d)
-                    ? "bg-blue-100 text-blue-700 border border-blue-200"
-                    : "bg-slate-100 text-slate-500 border border-slate-200 hover:bg-slate-200"
+                key={d.id}
+                onClick={() => toggleDept(d.name)}
+                className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${
+                  selectedDepts.includes(d.name)
+                    ? "bg-blue-100 text-blue-700 border border-blue-200 shadow-sm"
+                    : "bg-slate-100 text-slate-500 border border-slate-200 hover:bg-slate-200 hover:shadow-sm"
                 }`}
               >
-                {d}
+                {d.name}
               </button>
             ))}
           </div>

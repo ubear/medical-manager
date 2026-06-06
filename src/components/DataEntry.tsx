@@ -1,24 +1,44 @@
-import { useEffect, useState } from "react";
-import { getMetrics, saveRecords } from "../lib/db";
-import type { MetricDefinition } from "../lib/types";
-import { Save, Check, Upload } from "lucide-react";
-import { importFromCsv } from "../lib/db";
+import { useEffect, useState, useRef } from "react";
+import {
+  getMetrics,
+  saveRecords,
+  getDepartments,
+  importFromXlsx,
+} from "../lib/db";
+import type { MetricDefinition, Department } from "../lib/types";
+import { Save, Check, Upload, Calendar } from "lucide-react";
+import { DayPicker } from "react-day-picker";
+import "react-day-picker/style.css";
+import * as XLSX from "xlsx";
 
 export default function DataEntry() {
   const [metrics, setMetrics] = useState<MetricDefinition[]>([]);
-  const [date, setDate] = useState(
-    new Date().toISOString().slice(0, 10),
-  );
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [date, setDate] = useState<Date>(new Date());
   const [department, setDepartment] = useState("");
   const [values, setValues] = useState<Record<number, string>>({});
   const [saved, setSaved] = useState(false);
-  const [departments, setDepartments] = useState<string[]>([]);
+  const [showCalendar, setShowCalendar] = useState(false);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
+  const calendarRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     (async () => {
       const m = await getMetrics();
+      const d = await getDepartments();
       setMetrics(m);
+      setDepartments(d);
     })();
+  }, []);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (calendarRef.current && !calendarRef.current.contains(e.target as Node)) {
+        setShowCalendar(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
   function handleValueChange(metricId: number, val: string) {
@@ -27,57 +47,49 @@ export default function DataEntry() {
   }
 
   async function handleSubmit() {
-    if (!date || !department.trim()) return;
+    if (!date || !department) return;
     const records = metrics.map((m) => ({
-      date,
-      department: department.trim(),
+      date: date.toISOString().slice(0, 10),
+      department,
       metric_id: m.id,
-      value: values[m.id] !== undefined && values[m.id] !== ""
-        ? parseFloat(values[m.id])
-        : null,
+      value:
+        values[m.id] !== undefined && values[m.id] !== ""
+          ? parseFloat(values[m.id])
+          : null,
     }));
     await saveRecords(records);
-    if (!departments.includes(department.trim())) {
-      setDepartments((prev) => [...prev, department.trim()]);
-    }
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   }
 
-  async function handleCsvImport(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleXlsxImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    const text = await file.text();
-    const lines = text.trim().split("\n");
-    if (lines.length < 2) return;
-    const headers = lines[0].split(",").map((h) => h.trim());
-    const rows = [];
-    for (let i = 1; i < lines.length; i++) {
-      const cols = lines[i].split(",").map((c) => c.trim());
-      if (cols.length < headers.length) continue;
-      const row: Record<string, string> = {};
-      headers.forEach((h, j) => {
-        row[h] = cols[j];
-      });
-      for (let j = 2; j < headers.length; j++) {
-        const val = parseFloat(cols[j]);
-        if (!isNaN(val)) {
-          rows.push({
-            date: cols[0],
-            department: cols[1],
-            metric_name: headers[j],
-            value: val,
-          });
-        }
-      }
+
+    const data = await file.arrayBuffer();
+    const wb = XLSX.read(data, { type: "array" });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json<Record<string, string | number>>(sheet);
+
+    if (rows.length === 0) {
+      setImportMsg("文件无数据");
+      return;
     }
-    if (rows.length > 0) {
-      await importFromCsv(rows);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-    }
+
+    const result = await importFromXlsx(rows);
+    setImportMsg(
+      `导入 ${result.imported} 条记录` +
+        (result.newDepts.length > 0
+          ? `，新增科室：${result.newDepts.join("、")}`
+          : ""),
+    );
+    const d = await getDepartments();
+    setDepartments(d);
+    setTimeout(() => setImportMsg(null), 4000);
     e.target.value = "";
   }
+
+  const ds = date.toISOString().slice(0, 10);
 
   return (
     <div>
@@ -88,79 +100,124 @@ export default function DataEntry() {
             选择日期和科室，填入指标数值
           </p>
         </div>
-        <button
-          onClick={handleSubmit}
-          disabled={!date || !department.trim()}
-          className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-            saved
-              ? "bg-emerald-600 text-white"
-              : "bg-blue-600 text-white hover:bg-blue-700"
-          } disabled:opacity-40 disabled:cursor-not-allowed`}
-        >
-          {saved ? (
-            <>
-              <Check className="w-4 h-4" /> 已保存
-            </>
-          ) : (
-            <>
-              <Save className="w-4 h-4" /> 提交保存
-            </>
-          )}
-        </button>
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-1.5 px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-600 cursor-pointer hover:bg-slate-50 transition-colors shadow-sm">
+            <Upload className="w-4 h-4" />
+            导入 XLSX
+            <input
+              type="file"
+              accept=".xlsx,.xls"
+              onChange={handleXlsxImport}
+              className="hidden"
+            />
+          </label>
+          <button
+            onClick={handleSubmit}
+            disabled={!date || !department}
+            className={`flex items-center gap-1.5 px-5 py-2 rounded-lg text-sm font-medium transition-all shadow-sm ${
+              saved
+                ? "bg-emerald-600 text-white shadow-emerald-600/20"
+                : "bg-blue-600 text-white hover:bg-blue-700 shadow-blue-600/20"
+            } disabled:opacity-40 disabled:cursor-not-allowed`}
+          >
+            {saved ? (
+              <>
+                <Check className="w-4 h-4" /> 已保存
+              </>
+            ) : (
+              <>
+                <Save className="w-4 h-4" /> 提交保存
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
-      <div className="flex gap-4 mb-6">
-        <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">
+      {importMsg && (
+        <div className="mb-4 px-4 py-2.5 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700 shadow-sm">
+          {importMsg}
+        </div>
+      )}
+
+      <div className="flex gap-5 mb-6">
+        {/* Date picker */}
+        <div className="relative" ref={calendarRef}>
+          <label className="block text-xs font-medium text-slate-600 mb-1.5">
             日期
           </label>
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => {
-              setDate(e.target.value);
-              setSaved(false);
-            }}
-            className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
+          <button
+            onClick={() => setShowCalendar(!showCalendar)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-700 hover:border-blue-300 transition-all shadow-sm min-w-[160px]"
+          >
+            <Calendar className="w-4 h-4 text-slate-400" />
+            {ds}
+          </button>
+          {showCalendar && (
+            <div className="absolute top-full mt-2 z-50 bg-white rounded-xl shadow-xl border border-slate-200 p-2 animate-in fade-in zoom-in-95">
+              <DayPicker
+                mode="single"
+                selected={date}
+                onSelect={(d) => {
+                  if (d) {
+                    setDate(d);
+                    setSaved(false);
+                  }
+                  setShowCalendar(false);
+                }}
+                footer={
+                  <button
+                    onClick={() => {
+                      setDate(new Date());
+                      setShowCalendar(false);
+                    }}
+                    className="mt-2 text-xs text-blue-600 hover:text-blue-700"
+                  >
+                    回到今天
+                  </button>
+                }
+              />
+            </div>
+          )}
         </div>
+
+        {/* Department select */}
         <div className="flex-1 max-w-xs">
-          <label className="block text-xs font-medium text-slate-600 mb-1">
+          <label className="block text-xs font-medium text-slate-600 mb-1.5">
             科室
           </label>
-          <input
-            type="text"
+          <select
             value={department}
             onChange={(e) => {
               setDepartment(e.target.value);
               setSaved(false);
             }}
-            placeholder="输入科室名称"
-            list="dept-list"
-            className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-          <datalist id="dept-list">
+            className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-400 transition-all shadow-sm appearance-none cursor-pointer"
+          >
+            <option value="">选择科室...</option>
             {departments.map((d) => (
-              <option key={d} value={d} />
+              <option key={d.id} value={d.name}>
+                {d.name}
+              </option>
             ))}
-          </datalist>
+          </select>
         </div>
       </div>
 
-      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      {/* Metrics table */}
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
         <table className="w-full">
           <thead>
-            <tr className="border-b border-slate-100 bg-slate-50">
-              <th className="text-left px-5 py-3 text-xs font-medium text-slate-500 uppercase w-12">
+            <tr className="border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white">
+              <th className="text-left px-5 py-3.5 text-xs font-medium text-slate-500 uppercase w-12">
                 #
               </th>
-              <th className="text-left px-5 py-3 text-xs font-medium text-slate-500 uppercase">
+              <th className="text-left px-5 py-3.5 text-xs font-medium text-slate-500 uppercase">
                 指标名称
               </th>
-              <th className="text-left px-5 py-3 text-xs font-medium text-slate-500 uppercase">
+              <th className="text-left px-5 py-3.5 text-xs font-medium text-slate-500 uppercase">
                 数值
               </th>
-              <th className="text-left px-5 py-3 text-xs font-medium text-slate-500 uppercase">
+              <th className="text-left px-5 py-3.5 text-xs font-medium text-slate-500 uppercase">
                 单位
               </th>
             </tr>
@@ -169,7 +226,7 @@ export default function DataEntry() {
             {metrics.map((m, i) => (
               <tr
                 key={m.id}
-                className="border-b border-slate-50 hover:bg-slate-50/50"
+                className="border-b border-slate-50 hover:bg-blue-50/30 transition-colors"
               >
                 <td className="px-5 py-3 text-xs text-slate-400">{i + 1}</td>
                 <td className="px-5 py-3 text-sm text-slate-700 font-medium">
@@ -182,7 +239,7 @@ export default function DataEntry() {
                     value={values[m.id] ?? ""}
                     onChange={(e) => handleValueChange(m.id, e.target.value)}
                     placeholder="—"
-                    className="w-32 px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-36 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-400 transition-all"
                   />
                 </td>
                 <td className="px-5 py-3 text-sm text-slate-400">{m.unit}</td>
@@ -190,27 +247,6 @@ export default function DataEntry() {
             ))}
           </tbody>
         </table>
-      </div>
-
-      <div className="mt-6 p-4 bg-white border border-slate-200 rounded-xl">
-        <div className="flex items-center gap-3">
-          <Upload className="w-4 h-4 text-slate-400" />
-          <div>
-            <p className="text-sm font-medium text-slate-700">CSV 批量导入</p>
-            <p className="text-xs text-slate-400 mt-0.5">
-              格式：日期, 科室, 指标名1, 指标名2... (第一行为表头)
-            </p>
-          </div>
-          <label className="ml-auto px-3 py-1.5 bg-slate-100 text-slate-600 rounded-lg text-sm cursor-pointer hover:bg-slate-200 transition-colors">
-            选择文件
-            <input
-              type="file"
-              accept=".csv"
-              onChange={handleCsvImport}
-              className="hidden"
-            />
-          </label>
-        </div>
       </div>
     </div>
   );

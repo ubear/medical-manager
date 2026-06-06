@@ -1,5 +1,5 @@
 import Database from "@tauri-apps/plugin-sql";
-import type { MetricDefinition, RecordRow } from "./types";
+import type { MetricDefinition, RecordRow, Department } from "./types";
 
 const DB_PATH = "sqlite:medical.db";
 
@@ -149,14 +149,6 @@ export async function queryRecords(params: {
   return await d.select<RecordRow[]>(sql, bindings);
 }
 
-export async function getDepartments(): Promise<string[]> {
-  const d = await getDb();
-  const rows = await d.select<{ department: string }[]>(
-    "SELECT DISTINCT department FROM records ORDER BY department",
-  );
-  return rows.map((r) => r.department);
-}
-
 export async function importFromCsv(
   rows: { date: string; department: string; metric_name: string; value: number }[],
 ): Promise<void> {
@@ -234,4 +226,127 @@ export async function seedMockData(): Promise<void> {
       }
     }
   }
+}
+
+// ── Department CRUD ──
+
+export async function seedMockDepartments(): Promise<void> {
+  const d = await getDb();
+  const count = await d.select<{ count: number }[]>(
+    "SELECT COUNT(*) as count FROM departments",
+  );
+  if (count[0].count > 0) return;
+  const depts = ["心内科", "骨科", "普外科"];
+  for (const name of depts) {
+    await d.execute("INSERT INTO departments (name) VALUES ($1)", [name]);
+  }
+}
+
+export async function getDepartments(): Promise<Department[]> {
+  const d = await getDb();
+  return await d.select<Department[]>(
+    "SELECT * FROM departments ORDER BY id ASC",
+  );
+}
+
+export async function addDepartment(name: string): Promise<Department | null> {
+  const d = await getDb();
+  const existing = await d.select<Department[]>(
+    "SELECT * FROM departments WHERE name = $1",
+    [name],
+  );
+  if (existing.length > 0) return existing[0];
+  await d.execute("INSERT INTO departments (name) VALUES ($1)", [name]);
+  const rows = await d.select<Department[]>(
+    "SELECT * FROM departments WHERE name = $1",
+    [name],
+  );
+  return rows[0] ?? null;
+}
+
+export async function updateDepartment(
+  id: number,
+  name: string,
+): Promise<void> {
+  const d = await getDb();
+  await d.execute("UPDATE departments SET name = $1 WHERE id = $2", [name, id]);
+  await d.execute("UPDATE records SET department = $1 WHERE department = (SELECT name FROM departments WHERE id = $2)", [name, id]);
+}
+
+export async function deleteDepartment(id: number): Promise<void> {
+  const d = await getDb();
+  const rows = await d.select<{ name: string }[]>(
+    "SELECT name FROM departments WHERE id = $1",
+    [id],
+  );
+  if (rows.length === 0) return;
+  await d.execute("DELETE FROM records WHERE department = $1", [rows[0].name]);
+  await d.execute("DELETE FROM departments WHERE id = $1", [id]);
+}
+
+export async function ensureDepartment(name: string): Promise<void> {
+  const d = await getDb();
+  await d.execute("INSERT OR IGNORE INTO departments (name) VALUES ($1)", [
+    name,
+  ]);
+}
+
+// ── XLSX import ──
+
+export async function importFromXlsx(
+  rows: Record<string, string | number>[],
+): Promise<{ imported: number; newDepts: string[] }> {
+  const newDepts: string[] = [];
+  const d = await getDb();
+
+  // Get metric map
+  const metrics = await d.select<{ id: number; name: string }[]>(
+    "SELECT id, name FROM metric_definitions",
+  );
+  const metricMap = new Map(metrics.map((m) => [m.name, m.id]));
+
+  let imported = 0;
+  await withLock(async () => {
+    for (const row of rows) {
+      const dept = String(row.department || "").trim();
+      if (!dept || !row.date) continue;
+
+      // Auto-add unknown department
+      const existingDept = await d.select<{ name: string }[]>(
+        "SELECT name FROM departments WHERE name = $1",
+        [dept],
+      );
+      if (existingDept.length === 0) {
+        await d.execute("INSERT INTO departments (name) VALUES ($1)", [dept]);
+        newDepts.push(dept);
+      }
+
+      for (const [colName, val] of Object.entries(row)) {
+        if (colName === "date" || colName === "department") continue;
+        const metricId = metricMap.get(colName);
+        if (!metricId) continue;
+        const numVal = Number(val);
+        if (isNaN(numVal)) continue;
+
+        const existing = await d.select<{ id: number }[]>(
+          "SELECT id FROM records WHERE date = $1 AND department = $2 AND metric_id = $3",
+          [String(row.date), dept, metricId],
+        );
+        if (existing.length > 0) {
+          await d.execute("UPDATE records SET value = $1 WHERE id = $2", [
+            numVal,
+            existing[0].id,
+          ]);
+        } else {
+          await d.execute(
+            "INSERT INTO records (date, department, metric_id, value) VALUES ($1, $2, $3, $4)",
+            [String(row.date), dept, metricId, numVal],
+          );
+        }
+        imported++;
+      }
+    }
+  });
+
+  return { imported, newDepts };
 }

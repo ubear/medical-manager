@@ -22,6 +22,16 @@ pub fn run() {
                 FOREIGN KEY (metric_id) REFERENCES metric_definitions(id)
              );",
         kind: MigrationKind::Up,
+    },
+    Migration {
+        version: 2,
+        description: "create departments table",
+        sql: "CREATE TABLE IF NOT EXISTS departments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+             );",
+        kind: MigrationKind::Up,
     }];
 
     tauri::Builder::default()
