@@ -9,6 +9,7 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
+      actions: read
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
@@ -18,15 +19,42 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install dependencies
+      - name: Install frontend dependencies
         run: npm ci
 
-      - uses: tauri-apps/tauri-action@v0
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: v__VERSION__
           releaseName: "医疗指标管理系统 v__VERSION__"
           releaseBody: "See the assets to download and install this version."
-          releaseDraft: false
+          releaseDraft: true
           prerelease: false
+
+      - name: Zip NSIS output
+        shell: pwsh
+        run: |
+          $bundle = "src-tauri/target/release/bundle/nsis"
+          if (Test-Path "$bundle\*.msi") {
+            $msi = Get-ChildItem "$bundle\*.msi" | Select-Object -First 1
+            $zipName = "MedicalManager_Windows_${{ github.ref_name }}.zip"
+            Compress-Archive -Path $msi.FullName -DestinationPath $zipName
+            echo "zip=$zipName" >> $env:GITHUB_ENV
+          } elseif (Test-Path "$bundle\*.exe") {
+            $exe = Get-ChildItem "$bundle\*.exe" | Select-Object -First 1
+            $zipName = "MedicalManager_Windows_${{ github.ref_name }}.zip"
+            Compress-Archive -Path $exe.FullName -DestinationPath $zipName
+            echo "zip=$zipName" >> $env:GITHUB_ENV
+          }
+
+      - name: Upload zip artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MedicalManager_Windows
+          path: ${{ env.zip }}
+          if-no-files-found: warn

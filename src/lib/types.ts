@@ -1,8 +1,17 @@
+export interface MetricCategory {
+  id: number;
+  name: string;
+  is_builtin: number;
+  sort_order: number;
+  created_at: string;
+}
+
 export interface MetricDefinition {
   id: number;
   name: string;
   unit: string;
   is_builtin: number;
+  category_id: number | null;
   created_at: string;
 }
 

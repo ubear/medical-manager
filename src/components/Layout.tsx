@@ -8,8 +8,18 @@ import {
   Stethoscope,
   Building2,
   ScrollText,
+  ChevronDown,
+  ListFilter,
+  BarChart3,
+  GitCompare,
 } from "lucide-react";
 import LogModal from "./LogModal";
+
+const analysisChildren = [
+  { to: "/analysis/detail", label: "数据明细", icon: Table2 },
+  { to: "/analysis/summary", label: "汇总统计", icon: BarChart3 },
+  { to: "/analysis/yoy", label: "同比分析", icon: GitCompare },
+];
 
 const navItems = [
   {
@@ -25,12 +35,14 @@ const navItems = [
   {
     to: "/analysis",
     label: "数据分析",
-    icon: Table2,
+    icon: ListFilter,
     color: "emerald",
     bg: "bg-emerald-50",
     text: "text-emerald-700",
     iconColor: "text-emerald-600",
     dot: "bg-emerald-600",
+    expandable: true,
+    children: analysisChildren,
   },
   {
     to: "/chart",
@@ -67,6 +79,13 @@ const navItems = [
 export default function Layout() {
   const location = useLocation();
   const [logOpen, setLogOpen] = useState(false);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({
+    "/analysis": true,
+  });
+
+  function toggleExpand(key: string) {
+    setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
+  }
 
   return (
     <div className="flex h-screen bg-gradient-to-br from-slate-50 via-blue-50/20 to-slate-50">
@@ -79,33 +98,91 @@ export default function Layout() {
             医疗管理系统
           </span>
         </div>
-        <nav className="flex-1 py-5 px-4 space-y-1">
+        <nav className="flex-1 py-5 px-4 space-y-1 overflow-y-auto">
           {navItems.map((item) => {
-            const active = location.pathname === item.to;
+            const hasChildren = item.expandable && item.children;
+            const childActive = hasChildren
+              ? item.children!.some((c) => location.pathname === c.to)
+              : false;
+            const active = !hasChildren && location.pathname === item.to;
+            const isExpanded = expanded[item.to];
+
             return (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                className={`flex items-center gap-3.5 px-4 py-3 rounded-xl text-[15px] font-medium transition-all duration-200 ${
-                  active
-                    ? `${item.bg} ${item.text} shadow-sm`
-                    : "text-slate-500 hover:text-slate-700 hover:bg-slate-100/70"
-                }`}
-              >
-                <div
-                  className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
-                    active
-                      ? `${item.bg} ${item.iconColor}`
-                      : "bg-slate-100 text-slate-400 group-hover:bg-slate-200"
-                  }`}
-                >
-                  <item.icon className="w-4.5 h-4.5" />
-                </div>
-                {item.label}
-                {active && (
-                  <div className={`ml-auto w-1.5 h-1.5 rounded-full ${item.dot}`} />
+              <div key={item.to}>
+                {hasChildren ? (
+                  <button
+                    onClick={() => toggleExpand(item.to)}
+                    className={`w-full flex items-center gap-3.5 px-4 py-3 rounded-xl text-[15px] font-medium transition-all duration-200 ${
+                      childActive
+                        ? `${item.bg} ${item.text} shadow-sm`
+                        : "text-slate-500 hover:text-slate-700 hover:bg-slate-100/70"
+                    }`}
+                  >
+                    <div
+                      className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+                        childActive
+                          ? `${item.bg} ${item.iconColor}`
+                          : "bg-slate-100 text-slate-400"
+                      }`}
+                    >
+                      <item.icon className="w-4.5 h-4.5" />
+                    </div>
+                    {item.label}
+                    <ChevronDown
+                      className={`ml-auto w-4 h-4 transition-transform duration-200 ${
+                        isExpanded ? "rotate-0" : "-rotate-90"
+                      }`}
+                    />
+                    {childActive && (
+                      <div className={`w-1.5 h-1.5 rounded-full ${item.dot}`} />
+                    )}
+                  </button>
+                ) : (
+                  <NavLink
+                    to={item.to}
+                    className={`flex items-center gap-3.5 px-4 py-3 rounded-xl text-[15px] font-medium transition-all duration-200 ${
+                      active
+                        ? `${item.bg} ${item.text} shadow-sm`
+                        : "text-slate-500 hover:text-slate-700 hover:bg-slate-100/70"
+                    }`}
+                  >
+                    <div
+                      className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+                        active
+                          ? `${item.bg} ${item.iconColor}`
+                          : "bg-slate-100 text-slate-400"
+                      }`}
+                    >
+                      <item.icon className="w-4.5 h-4.5" />
+                    </div>
+                    {item.label}
+                    {active && (
+                      <div className={`ml-auto w-1.5 h-1.5 rounded-full ${item.dot}`} />
+                    )}
+                  </NavLink>
                 )}
-              </NavLink>
+                {hasChildren && isExpanded && (
+                  <div className="ml-11 mt-0.5 space-y-0.5">
+                    {item.children!.map((child) => {
+                      const subActive = location.pathname === child.to;
+                      return (
+                        <NavLink
+                          key={child.to}
+                          to={child.to}
+                          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium transition-all duration-200 ${
+                            subActive
+                              ? "bg-emerald-50 text-emerald-700"
+                              : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+                          }`}
+                        >
+                          <child.icon className="w-3.5 h-3.5 opacity-60" />
+                          {child.label}
+                        </NavLink>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             );
           })}
         </nav>

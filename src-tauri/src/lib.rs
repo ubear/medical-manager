@@ -32,6 +32,30 @@ pub fn run() {
                 created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
              );",
         kind: MigrationKind::Up,
+    },
+    Migration {
+        version: 3,
+        description: "create metric_categories table",
+        sql: "CREATE TABLE IF NOT EXISTS metric_categories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                is_builtin INTEGER NOT NULL DEFAULT 0,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+             );",
+        kind: MigrationKind::Up,
+    },
+    Migration {
+        version: 4,
+        description: "migrate date format from YYYY-MM-DD to YYYY-MM",
+        sql: "UPDATE records SET date = substr(date, 1, 7) WHERE length(date) = 10;",
+        kind: MigrationKind::Up,
+    },
+    Migration {
+        version: 5,
+        description: "add category_id to metric_definitions",
+        sql: "ALTER TABLE metric_definitions ADD COLUMN category_id INTEGER REFERENCES metric_categories(id);",
+        kind: MigrationKind::Up,
     }];
 
     tauri::Builder::default()

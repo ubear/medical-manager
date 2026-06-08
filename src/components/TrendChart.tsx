@@ -12,15 +12,26 @@ import { CanvasRenderer } from "echarts/renderers";
 import { queryRecords, getMetrics, getDepartments } from "../lib/db";
 import { log } from "../lib/logger";
 import type { MetricDefinition, Department } from "../lib/types";
-import { TrendingUp, BarChart3, AreaChart, Download } from "lucide-react";
-import DatePicker from "./DatePicker";
+import { TrendingUp, BarChart3, AreaChart, Download, GitCompare } from "lucide-react";
+import MonthPicker, { formatMonth } from "./MonthPicker";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeFile } from "@tauri-apps/plugin-fs";
 
-function daysAgo(n: number): Date {
+function monthsAgo(n: number): Date {
   const d = new Date();
-  d.setDate(d.getDate() - n);
+  d.setMonth(d.getMonth() - n);
   return d;
+}
+
+function offsetMonth(dateStr: string, offset: number): string {
+  const [y, m] = dateStr.split("-").map(Number);
+  const d = new Date(y, m - 1 + offset, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function escapeHtml(s: string): string {
+  const map: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+  return s.replace(/[&<>"']/g, (c) => map[c]);
 }
 
 echarts.use([
@@ -46,9 +57,10 @@ export default function TrendChart() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [selectedMetrics, setSelectedMetrics] = useState<number[]>([]);
   const [selectedDepts, setSelectedDepts] = useState<string[]>([]);
-  const [dateFrom, setDateFrom] = useState<Date>(() => daysAgo(7));
+  const [dateFrom, setDateFrom] = useState<Date>(() => monthsAgo(12));
   const [dateTo, setDateTo] = useState<Date>(() => new Date());
   const [chartType, setChartType] = useState<ChartType>("line");
+  const [yoyMode, setYoyMode] = useState(false);
   const [chartOption, setChartOption] = useState<echarts.EChartsCoreOption | null>(null);
   const [hint, setHint] = useState("");
   const [summary, setSummary] = useState<
@@ -67,7 +79,7 @@ export default function TrendChart() {
     const base64 = dataUrl.split(",")[1];
     const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
     const path = await save({
-      defaultPath: `趋势图_${new Date().toISOString().slice(0, 10)}.png`,
+      defaultPath: `趋势图_${formatMonth(new Date())}.png`,
       filters: [{ name: "PNG", extensions: ["png"] }],
     });
     if (path) {
@@ -96,60 +108,116 @@ export default function TrendChart() {
     if (selectedMetrics.length === 0 || selectedDepts.length === 0) return;
     setHint("");
 
-    const rows = await queryRecords({
-      dateFrom: dateFrom?.toISOString().slice(0, 10),
-      dateTo: dateTo?.toISOString().slice(0, 10),
+    const dateFromStr = formatMonth(dateFrom!);
+    const dateToStr = formatMonth(dateTo!);
+
+    const currentRows = await queryRecords({
+      dateFrom: dateFromStr,
+      dateTo: dateToStr,
       departments: selectedDepts,
       metricIds: selectedMetrics,
     });
 
-    const dateSet = new Set(rows.map((r) => r.date));
+    let yoyRows: typeof currentRows = [];
+    if (yoyMode) {
+      yoyRows = await queryRecords({
+        dateFrom: offsetMonth(dateFromStr, -12),
+        dateTo: offsetMonth(dateToStr, -12),
+        departments: selectedDepts,
+        metricIds: selectedMetrics,
+      });
+    }
+
+    const dateSet = new Set(currentRows.map((r) => r.date));
     const dates = Array.from(dateSet).sort();
     const metricMap = new Map(metrics.map((m) => [m.id, m]));
 
-    // Build series — keyed by "metric - department"
-    const seriesMap = new Map<string, (number | null)[]>();
-    for (const r of rows) {
+    // Build series: current data, key = "metric - dept"
+    const currentSeriesMap = new Map<string, (number | null)[]>();
+    for (const r of currentRows) {
       const m = metricMap.get(r.metric_id);
       if (!m) continue;
       const key = `${m.name} - ${r.department}`;
-      if (!seriesMap.has(key)) {
-        seriesMap.set(key, Array(dates.length).fill(null));
-      }
+      if (!currentSeriesMap.has(key)) currentSeriesMap.set(key, Array(dates.length).fill(null));
       const idx = dates.indexOf(r.date);
-      if (idx >= 0) {
-        seriesMap.get(key)![idx] = r.value;
+      if (idx >= 0) currentSeriesMap.get(key)![idx] = r.value;
+    }
+
+    // Build series: YoY data, key = "metric - dept [同期]"
+    const yoySeriesMap = new Map<string, (number | null)[]>();
+    if (yoyMode) {
+      for (const r of yoyRows) {
+        const m = metricMap.get(r.metric_id);
+        if (!m) continue;
+        const key = `${m.name} - ${r.department} [同期]`;
+        if (!yoySeriesMap.has(key)) yoySeriesMap.set(key, Array(dates.length).fill(null));
+        // Map YoY date to current period's X axis position
+        const mappedDate = offsetMonth(r.date, 12);
+        const idx = dates.indexOf(mappedDate);
+        if (idx >= 0) yoySeriesMap.get(key)![idx] = r.value;
       }
     }
 
-    const seriesEntries = Array.from(seriesMap.entries());
-    const series = seriesEntries.map(([name, data], i) => ({
-      name,
-      type: chartType === "area" ? "line" : chartType,
-      data,
-      smooth: chartType !== "bar",
-      symbol: chartType === "bar" ? "none" : "circle",
-      symbolSize: 4,
-      lineStyle: chartType !== "bar" ? { width: 2 } : undefined,
-      areaStyle:
-        chartType === "area" ? { opacity: 0.08 } : undefined,
-      color: PALETTE[i % PALETTE.length],
-    }));
+    // Merge series with paired colors: current[i] and yoy[i] share same palette color
+    const currentEntries = Array.from(currentSeriesMap.entries());
+    const yoyEntries = Array.from(yoySeriesMap.entries());
+    const series: echarts.EChartsCoreOption["series"] = [];
+    let paletteIdx = 0;
+    for (const [name, data] of currentEntries) {
+      series.push({
+        name, type: chartType === "area" ? "line" : chartType, data,
+        smooth: chartType !== "bar",
+        symbol: chartType === "bar" ? "none" : "circle",
+        symbolSize: 4,
+        lineStyle: { width: 2, type: "solid" },
+        areaStyle: chartType === "area" ? { opacity: 0.08 } : undefined,
+        opacity: 1,
+        color: PALETTE[paletteIdx % PALETTE.length],
+      });
+      // Find paired YoY series for same metric+dept
+      const yoyName = `${name} [同期]`;
+      const yoyEntry = yoyEntries.find(([k]) => k === yoyName);
+      if (yoyEntry) {
+        series.push({
+          name: yoyEntry[0], type: chartType === "area" ? "line" : chartType, data: yoyEntry[1],
+          smooth: chartType !== "bar",
+          symbol: chartType === "bar" ? "none" : "circle",
+          symbolSize: 3,
+          lineStyle: { width: 2, type: "dashed" },
+          areaStyle: chartType === "area" ? { opacity: 0.03 } : undefined,
+          opacity: 0.5,
+          color: PALETTE[paletteIdx % PALETTE.length],
+        });
+      }
+      paletteIdx++;
+    }
 
-    // KPI summary: per-metric stats from all data
+    // Summary from current data only
     const summaryItems: typeof summary = [];
     for (const mid of selectedMetrics) {
       const m = metricMap.get(mid);
       if (!m) continue;
       const vals: number[] = [];
-      for (const r of rows) {
+      for (const r of currentRows) {
         if (r.metric_id === mid && r.value != null) vals.push(r.value);
       }
       if (vals.length > 0) {
+        // Latest = average across all departments on the most recent date
+        const byDate = new Map<string, number[]>();
+        for (const r of currentRows) {
+          if (r.metric_id === mid && r.value != null) {
+            if (!byDate.has(r.date)) byDate.set(r.date, []);
+            byDate.get(r.date)!.push(r.value);
+          }
+        }
+        const latestDate = Array.from(byDate.keys()).sort().pop()!;
+        const latestVals = byDate.get(latestDate)!;
+        const latest = latestVals.reduce((s, v) => s + v, 0) / latestVals.length;
+
         summaryItems.push({
           metric: m.name,
           unit: m.unit,
-          latest: vals[0],
+          latest,
           avg: vals.reduce((s, v) => s + v, 0) / vals.length,
           min: Math.min(...vals),
           max: Math.max(...vals),
@@ -174,7 +242,7 @@ export default function TrendChart() {
           for (const item of params) {
             html += `<div style="display:flex;align-items:center;gap:8px;font-size:12px">
               <span style="width:8px;height:8px;border-radius:50%;background:${item.color};display:inline-block;flex-shrink:0"></span>
-              <span style="color:#64748b">${item.seriesName}</span>
+              <span style="color:#64748b">${escapeHtml(item.seriesName)}</span>
               <span style="font-weight:500;color:#1e293b;margin-left:auto">${item.value ?? "—"}</span>
             </div>`;
           }
@@ -205,7 +273,7 @@ export default function TrendChart() {
     };
 
     setChartOption(option);
-  }, [selectedMetrics, selectedDepts, dateFrom, dateTo, chartType, metrics]);
+  }, [selectedMetrics, selectedDepts, dateFrom, dateTo, chartType, metrics, yoyMode]);
 
   // Auto-query when selections are ready
   useEffect(() => {
@@ -345,17 +413,31 @@ export default function TrendChart() {
           </div>
         </div>
         <div className="flex items-end gap-4">
+          <button
+            onClick={() => setYoyMode(!yoyMode)}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-sm ${
+              yoyMode
+                ? "bg-amber-100 text-amber-700 border border-amber-200"
+                : "bg-white border border-slate-200 text-slate-500 hover:bg-slate-50"
+            }`}
+          >
+            <GitCompare className="w-4 h-4" />
+            同期对比
+            {yoyMode && (
+              <span className="ml-1 w-1.5 h-1.5 rounded-full bg-amber-500" />
+            )}
+          </button>
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1.5">
-              起始日期
+              起始月份
             </label>
-            <DatePicker value={dateFrom} onChange={setDateFrom} />
+            <MonthPicker value={dateFrom} onChange={setDateFrom} />
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1.5">
-              结束日期
+              结束月份
             </label>
-            <DatePicker value={dateTo} onChange={setDateTo} placeholder="不限" />
+            <MonthPicker value={dateTo} onChange={setDateTo} placeholder="不限" />
           </div>
           <div className="flex items-center gap-3">
             <button
