@@ -161,7 +161,7 @@ export default function TrendChart() {
     // Merge series with paired colors: current[i] and yoy[i] share same palette color
     const currentEntries = Array.from(currentSeriesMap.entries());
     const yoyEntries = Array.from(yoySeriesMap.entries());
-    const series: echarts.LineSeriesOption[] = [];
+    const series: Record<string, unknown>[] = [];
     let paletteIdx = 0;
     for (const [name, data] of currentEntries) {
       series.push({
