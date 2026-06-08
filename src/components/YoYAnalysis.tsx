@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState } from "react";
 import { queryRecords, getMetrics, getDepartments } from "../lib/db";
 import type { MetricDefinition, Department } from "../lib/types";
 import MonthPicker, { formatMonth } from "./MonthPicker";

@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { queryRecords, getMetrics, getDepartments } from "../lib/db";
 import type { MetricDefinition, RecordRow, Department } from "../lib/types";
 import { log } from "../lib/logger";

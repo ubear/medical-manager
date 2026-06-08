@@ -223,7 +223,7 @@ export default function DataEntry() {
                     <span className="ml-2 font-normal text-slate-400">({group.metrics.length})</span>
                   </td>
                 </tr>
-                {group.metrics.map((m, j) => {
+                {group.metrics.map((m) => {
                   const isInt = INTEGER_UNITS.has(m.unit);
                   const err = errors[m.id];
                   const globalIdx = metrics.findIndex((x) => x.id === m.id) + 1;
