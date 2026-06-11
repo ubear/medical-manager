@@ -10,7 +10,6 @@ import {
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 import { queryRecords, getMetrics, getDepartments } from "../lib/db";
-import { log } from "../lib/logger";
 import type { MetricDefinition, Department } from "../lib/types";
 import { TrendingUp, BarChart3, AreaChart, Download, GitCompare } from "lucide-react";
 import MonthPicker, { formatMonth } from "./MonthPicker";
@@ -69,22 +68,25 @@ export default function TrendChart() {
   const chartRef = useRef<ReactEChartsCore>(null);
 
   async function handleSaveChart() {
-    const instance = chartRef.current?.getEchartsInstance();
-    if (!instance) return;
-    const dataUrl = instance.getDataURL({
-      type: "png",
-      pixelRatio: 2,
-      backgroundColor: "#fff",
-    });
-    const base64 = dataUrl.split(",")[1];
-    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-    const path = await save({
-      defaultPath: `趋势图_${formatMonth(new Date())}.png`,
-      filters: [{ name: "PNG", extensions: ["png"] }],
-    });
-    if (path) {
+    try {
+      const instance = chartRef.current?.getEchartsInstance();
+      if (!instance) return;
+      const dataUrl = instance.getDataURL({
+        type: "png",
+        pixelRatio: 2,
+        backgroundColor: "#fff",
+      });
+      const base64 = dataUrl.split(",")[1];
+      const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+      const path = await save({
+        defaultPath: `趋势图_${formatMonth(new Date())}.png`,
+        filters: [{ name: "PNG", extensions: ["png"] }],
+      });
+      if (!path) return;
       await writeFile(path, bytes);
-      log.info("TrendChart", `图表已保存: ${path}`);
+      alert(`图表已保存: ${path}`);
+    } catch (e: any) {
+      alert(`保存失败: ${e?.message ?? e}`);
     }
   }
 

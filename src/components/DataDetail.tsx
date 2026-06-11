@@ -1,7 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { queryRecords, getMetrics, getDepartments } from "../lib/db";
 import type { MetricDefinition, RecordRow, Department } from "../lib/types";
-import { log } from "../lib/logger";
 import { Download, Search, RotateCcw, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import MonthPicker, { formatMonth } from "./MonthPicker";
 import { save } from "@tauri-apps/plugin-dialog";
@@ -111,17 +110,24 @@ export default function DataDetail() {
 
   async function handleExport() {
     if (sorted.length === 0) return;
-    const path = await save({
-      defaultPath: `数据明细_${formatMonth(new Date())}.xlsx`,
-      filters: [{ name: "Excel", extensions: ["xlsx"] }],
-    });
-    if (!path) return;
-    const ws = XLSX.utils.json_to_sheet(sorted);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "数据明细");
-    const data = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
-    await writeFile(path, new Uint8Array(data));
-    log.info("DataDetail", `导出 Excel: ${sorted.length} 行 → ${path}`);
+    try {
+      const prefix = selectedDepts.length > 0
+        ? selectedDepts.join("_")
+        : "数据明细";
+      const path = await save({
+        defaultPath: `${prefix}_${formatMonth(new Date())}.xlsx`,
+      });
+      if (!path) return;
+      const ws = XLSX.utils.json_to_sheet(sorted);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "数据明细");
+      const data = XLSX.write(wb, { type: "array", bookType: "xlsx" });
+      const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+      await writeFile(path, bytes);
+      alert(`导出成功: ${sorted.length} 行数据已保存`);
+    } catch (e: any) {
+      alert(`导出失败: ${e?.message ?? e}`);
+    }
   }
 
   return (
