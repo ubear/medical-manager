@@ -35,7 +35,7 @@ export default function DataEntry() {
     })();
   }, []);
 
-  function validate(metricId: number, val: string): string {
+  function validate(_metricId: number, val: string): string {
     if (val === "" || val === undefined) return "";
     const num = Number(val);
     if (isNaN(num)) return "请输入数字";

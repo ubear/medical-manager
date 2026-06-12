@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   PenLine, Table2, TrendingUp, Settings2, Stethoscope, Building2,
   ChevronDown, ListFilter, BarChart3, GitCompare, ScrollText,
-  Lock, KeyRound, LogOut, AlertCircle, CheckCircle2, X,
+  KeyRound, LogOut, AlertCircle, CheckCircle2, X,
 } from "lucide-react";
 import LogModal from "./LogModal";
 
