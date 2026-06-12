@@ -6,6 +6,7 @@ import MonthPicker, { formatMonth } from "./MonthPicker";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeFile } from "@tauri-apps/plugin-fs";
 import * as XLSX from "xlsx";
+import { log } from "../lib/logger";
 
 function monthsAgo(n: number): Date {
   const d = new Date();
@@ -38,13 +39,19 @@ export default function DataDetail() {
 
   async function handleSearch() {
     setLoading(true);
-    const rows = await queryRecords({
-      dateFrom: formatMonth(dateFrom),
-      dateTo: formatMonth(dateTo),
-      departments: selectedDepts.length > 0 ? selectedDepts : undefined,
-    });
-    setRecords(rows);
-    setLoading(false);
+    try {
+      const rows = await queryRecords({
+        dateFrom: formatMonth(dateFrom),
+        dateTo: formatMonth(dateTo),
+        departments: selectedDepts.length > 0 ? selectedDepts : undefined,
+      });
+      setRecords(rows);
+    } catch (e) {
+      log.error("DataDetail", "查询失败", e);
+      alert("查询失败，请重试");
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function handleReset() {

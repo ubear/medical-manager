@@ -141,9 +141,20 @@ export async function addCustomMetric(
 export async function deleteCustomMetric(id: number): Promise<void> {
   await withLock(async () => {
     const d = await getDb();
-    await d.execute("DELETE FROM metric_definitions WHERE id = $1 AND is_builtin = 0", [id]);
+    await d.execute("DELETE FROM metric_definitions WHERE id = $1", [id]);
     await d.execute("DELETE FROM records WHERE metric_id = $1", [id]);
   });
+}
+
+export async function updateMetric(id: number, name: string, unit: string): Promise<void> {
+  await withLock(async () => {
+    const d = await getDb();
+    await d.execute(
+      "UPDATE metric_definitions SET name = $1, unit = $2 WHERE id = $3",
+      [name, unit, id],
+    );
+  });
+  log.info("DB", `updateMetric: ${id} → ${name}(${unit})`);
 }
 
 // ═══════════════════════════════════════════════

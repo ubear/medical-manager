@@ -12,7 +12,6 @@ import { Save, Check, Upload, FileSpreadsheet, RotateCcw } from "lucide-react";
 import MonthPicker, { formatMonth } from "./MonthPicker";
 import * as XLSX from "xlsx";
 
-const INTEGER_UNITS = new Set(["台", "次"]);
 
 export default function DataEntry() {
   const [metrics, setMetrics] = useState<MetricDefinition[]>([]);
@@ -40,13 +39,8 @@ export default function DataEntry() {
     if (val === "" || val === undefined) return "";
     const num = Number(val);
     if (isNaN(num)) return "请输入数字";
-    const metric = metrics.find((m) => m.id === metricId);
-    if (metric && INTEGER_UNITS.has(metric.unit) && !Number.isInteger(num)) {
-      return "请输入整数";
-    }
     return "";
   }
-
   function handleValueChange(metricId: number, val: string) {
     setValues((prev) => ({ ...prev, [metricId]: val }));
     setErrors((prev) => ({ ...prev, [metricId]: validate(metricId, val) }));
@@ -55,7 +49,6 @@ export default function DataEntry() {
 
   async function handleSubmit() {
     if (!date || !department) return;
-    // Check for errors
     const hasErrors = Object.values(errors).some((e) => e !== "");
     if (hasErrors) return;
 
@@ -68,12 +61,17 @@ export default function DataEntry() {
           ? parseFloat(values[m.id])
           : null,
     }));
-    await saveRecords(records);
-    log.info("DataEntry", `提交: ${department} ${formatMonth(date)}, ${records.filter(r=>r.value!=null).length} 项`);
-    setValues({});
-    setErrors({});
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    try {
+      await saveRecords(records);
+      log.info("DataEntry", `提交: ${department} ${formatMonth(date)}, ${records.filter(r=>r.value!=null).length} 项`);
+      setValues({});
+      setErrors({});
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      log.error("DataEntry", "保存失败", e);
+      alert("保存失败，请重试");
+    }
   }
 
   function handleClear() {
@@ -224,7 +222,6 @@ export default function DataEntry() {
                   </td>
                 </tr>
                 {group.metrics.map((m) => {
-                  const isInt = INTEGER_UNITS.has(m.unit);
                   const err = errors[m.id];
                   const globalIdx = metrics.findIndex((x) => x.id === m.id) + 1;
                   return (
@@ -235,7 +232,7 @@ export default function DataEntry() {
                         <div className="relative">
                           <input
                             type="number"
-                            step={isInt ? "1" : "0.1"}
+                            step="0.0001"
                             value={values[m.id] ?? ""}
                             onChange={(e) => handleValueChange(m.id, e.target.value)}
                             placeholder="留空则跳过"
@@ -261,7 +258,6 @@ export default function DataEntry() {
           ) : (
             <tbody>
               {metrics.map((m, i) => {
-                const isInt = INTEGER_UNITS.has(m.unit);
                 const err = errors[m.id];
                 return (
                   <tr key={m.id} className="border-b border-slate-100 hover:bg-blue-50/30 transition-colors">
@@ -270,8 +266,7 @@ export default function DataEntry() {
                     <td className="px-5 py-3">
                       <div className="relative">
                         <input
-                          type="number"
-                          step={isInt ? "1" : "0.1"}
+                          step="0.0001"
                           value={values[m.id] ?? ""}
                           onChange={(e) => handleValueChange(m.id, e.target.value)}
                           placeholder="留空则跳过"

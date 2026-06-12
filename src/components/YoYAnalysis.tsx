@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { queryRecords, getMetrics, getDepartments } from "../lib/db";
 import type { MetricDefinition, Department } from "../lib/types";
 import MonthPicker, { formatMonth } from "./MonthPicker";
-import { Search, RotateCcw, GitCompare, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { Search, RotateCcw, GitCompare, TrendingUp, TrendingDown, Minus, CalendarRange } from "lucide-react";
 
 function monthsAgo(n: number): Date {
   const d = new Date();
@@ -27,6 +27,10 @@ export default function YoYAnalysis() {
     prevLabel: string;
     rows: { metric: string; unit: string; current: number | null; prev: number | null; change: number | null }[];
   } | null>(null);
+  const [presetMode, setPresetMode] = useState<"month" | "quarter" | "half" | "year" | "custom">("custom");
+  const [presetYear, setPresetYear] = useState(() => new Date().getFullYear());
+  const [presetQuarter, setPresetQuarter] = useState<1 | 2 | 3 | 4>(() => Math.ceil((new Date().getMonth() + 1) / 3) as 1 | 2 | 3 | 4);
+  const [presetHalf, setPresetHalf] = useState<1 | 2>(() => (new Date().getMonth() < 6 ? 1 : 2));
 
   useEffect(() => {
     (async () => {
@@ -37,24 +41,23 @@ export default function YoYAnalysis() {
     })();
   }, []);
 
-  async function handleSearch() {
-    const from = formatMonth(dateFrom);
-    const to = formatMonth(dateTo);
+  async function runSearch(from: Date, to: Date) {
+    const fromStr = formatMonth(from);
+    const toStr = formatMonth(to);
 
     const [currentRows, prevRows] = await Promise.all([
       queryRecords({
-        dateFrom: from,
-        dateTo: to,
+        dateFrom: fromStr,
+        dateTo: toStr,
         departments: selectedDepts.length > 0 ? selectedDepts : undefined,
       }),
       queryRecords({
-        dateFrom: offsetMonth(from, -12),
-        dateTo: offsetMonth(to, -12),
+        dateFrom: offsetMonth(fromStr, -12),
+        dateTo: offsetMonth(toStr, -12),
         departments: selectedDepts.length > 0 ? selectedDepts : undefined,
       }),
     ]);
 
-    // Aggregate by metric
     const currentMap = new Map<string, number[]>();
     const prevMap = new Map<string, number[]>();
 
@@ -83,11 +86,42 @@ export default function YoYAnalysis() {
       });
 
     setComparison({
-      currentLabel: `${from} ~ ${to}`,
-      prevLabel: `${offsetMonth(from, -12)} ~ ${offsetMonth(to, -12)}`,
+      currentLabel: `${fromStr} ~ ${toStr}`,
+      prevLabel: `${offsetMonth(fromStr, -12)} ~ ${offsetMonth(toStr, -12)}`,
       rows,
     });
   }
+
+  function applyPreset(): { from: Date; to: Date } | null {
+    switch (presetMode) {
+      case "month": {
+        if (!dateFrom) return null;
+        return { from: dateFrom, to: dateFrom };
+      }
+      case "quarter": {
+        const fm = (presetQuarter - 1) * 3;
+        return { from: new Date(presetYear, fm, 1), to: new Date(presetYear, fm + 2, 1) };
+      }
+      case "half": {
+        const fm = presetHalf === 1 ? 0 : 6;
+        return { from: new Date(presetYear, fm, 1), to: new Date(presetYear, fm + 5, 1) };
+      }
+      case "year": {
+        return { from: new Date(presetYear, 0, 1), to: new Date(presetYear, 11, 1) };
+      }
+      case "custom":
+        return { from: dateFrom, to: dateTo };
+    }
+  }
+
+  async function handleSearch() {
+    const range = applyPreset();
+    if (!range) return;
+    setDateFrom(range.from);
+    setDateTo(range.to);
+    await runSearch(range.from, range.to);
+  }
+
 
   function toggleDept(name: string) {
     setSelectedDepts((prev) => (prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]));
@@ -95,11 +129,11 @@ export default function YoYAnalysis() {
 
   function fmt(n: number): string {
     if (Number.isInteger(n)) return String(n);
-    return n.toFixed(1);
+    return n.toFixed(2);
   }
 
   function pct(n: number): string {
-    return (n > 0 ? "+" : "") + n.toFixed(1);
+    return (n > 0 ? "+" : "") + n.toFixed(2);
   }
 
   return (
@@ -110,22 +144,115 @@ export default function YoYAnalysis() {
       </div>
 
       <div className="bg-white border border-slate-200 rounded-xl p-4 mb-6 shadow-sm">
+        {/* Preset chips */}
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          {[
+            { key: "month", label: "单月" },
+            { key: "quarter", label: "季度" },
+            { key: "half", label: "半年" },
+            { key: "year", label: "全年" },
+            { key: "custom", label: "自定义" },
+          ].map((p) => (
+            <button
+              key={p.key}
+              onClick={() => {
+                setPresetMode(p.key as typeof presetMode);
+                setComparison(null);
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                presetMode === p.key
+                  ? "bg-blue-600 text-white shadow-sm"
+                  : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+              }`}
+            >
+              {p.key === "month" && <CalendarRange className="w-3.5 h-3.5 inline mr-1" />}
+              {p.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Selector area */}
         <div className="flex flex-wrap items-end gap-4 mb-3">
-          <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1.5">起始月份</label>
-            <MonthPicker value={dateFrom} onChange={setDateFrom} />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1.5">结束月份</label>
-            <MonthPicker value={dateTo} onChange={setDateTo} placeholder="不限" />
-          </div>
-          <button onClick={handleSearch} className="flex items-center gap-1.5 px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors shadow-sm">
+          {presetMode === "custom" ? (
+            <>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1.5">起始月份</label>
+                <MonthPicker value={dateFrom} onChange={setDateFrom} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1.5">结束月份</label>
+                <MonthPicker value={dateTo} onChange={setDateTo} placeholder="不限" />
+              </div>
+            </>
+          ) : presetMode === "month" ? (
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1.5">选择月份</label>
+              <MonthPicker value={dateFrom} onChange={(d) => { setDateFrom(d); setDateTo(d); }} />
+            </div>
+          ) : presetMode === "quarter" ? (
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1.5">选择季度</label>
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1">
+                  <button onClick={() => setPresetYear((y) => y - 1)} className="w-7 h-7 flex items-center justify-center rounded hover:bg-slate-100 text-slate-500 text-sm">‹</button>
+                  <span className="px-2 text-sm font-semibold text-slate-700 min-w-[48px] text-center">{presetYear}年</span>
+                  <button onClick={() => setPresetYear((y) => y + 1)} className="w-7 h-7 flex items-center justify-center rounded hover:bg-slate-100 text-slate-500 text-sm">›</button>
+                </div>
+                {([1, 2, 3, 4] as const).map((q) => (
+                  <button
+                    key={q}
+                    onClick={() => setPresetQuarter(q)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      presetQuarter === q
+                        ? "bg-blue-600 text-white shadow-sm"
+                        : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                    }`}
+                  >Q{q}</button>
+                ))}
+              </div>
+            </div>
+          ) : presetMode === "half" ? (
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1.5">选择半年</label>
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1">
+                  <button onClick={() => setPresetYear((y) => y - 1)} className="w-7 h-7 flex items-center justify-center rounded hover:bg-slate-100 text-slate-500 text-sm">‹</button>
+                  <span className="px-2 text-sm font-semibold text-slate-700 min-w-[48px] text-center">{presetYear}年</span>
+                  <button onClick={() => setPresetYear((y) => y + 1)} className="w-7 h-7 flex items-center justify-center rounded hover:bg-slate-100 text-slate-500 text-sm">›</button>
+                </div>
+                {([1, 2] as const).map((h) => (
+                  <button
+                    key={h}
+                    onClick={() => setPresetHalf(h)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      presetHalf === h
+                        ? "bg-blue-600 text-white shadow-sm"
+                        : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                    }`}
+                  >{h === 1 ? "上半年" : "下半年"}</button>
+                ))}
+              </div>
+            </div>
+          ) : presetMode === "year" && (
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1.5">选择年份</label>
+              <div className="flex items-center gap-1">
+                <button onClick={() => setPresetYear((y) => y - 1)} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 transition-colors">‹</button>
+                <span className="px-4 py-2 text-sm font-semibold text-slate-700 min-w-[80px] text-center bg-white border border-slate-200 rounded-lg">{presetYear}年</span>
+                <button onClick={() => setPresetYear((y) => y + 1)} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 transition-colors">›</button>
+              </div>
+            </div>
+          )}
+
+          <button onClick={handleSearch} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors shadow-sm">
             <Search className="w-4 h-4" /> 对比分析
           </button>
-          <button onClick={() => setComparison(null)} className="flex items-center gap-1.5 px-4 py-1.5 text-sm text-slate-500 hover:text-slate-700 transition-colors">
+          <button onClick={() => setComparison(null)} className="flex items-center gap-1.5 px-4 py-2 text-sm text-slate-500 hover:text-slate-700 transition-colors">
             <RotateCcw className="w-4 h-4" /> 清空
           </button>
         </div>
+
+        {/* Department selector */}
         {departments.length > 0 && (
           <div className="flex flex-wrap items-center gap-2">
             <button onClick={() => setSelectedDepts(departments.map((d) => d.name))} className="text-xs text-blue-600 hover:text-blue-700 font-medium mr-1">全选</button>

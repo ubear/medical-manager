@@ -1,19 +1,16 @@
 import { useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { invoke } from "@tauri-apps/api/core";
 import {
-  PenLine,
-  Table2,
-  TrendingUp,
-  Settings2,
-  Stethoscope,
-  Building2,
-  ScrollText,
-  ChevronDown,
-  ListFilter,
-  BarChart3,
-  GitCompare,
+  PenLine, Table2, TrendingUp, Settings2, Stethoscope, Building2,
+  ChevronDown, ListFilter, BarChart3, GitCompare, ScrollText,
+  Lock, KeyRound, LogOut, AlertCircle, CheckCircle2, X,
 } from "lucide-react";
 import LogModal from "./LogModal";
+
+interface Props {
+  onLogout?: () => void;
+}
 
 const analysisChildren = [
   { to: "/analysis/detail", label: "数据明细", icon: Table2 },
@@ -76,15 +73,56 @@ const navItems = [
   },
 ];
 
-export default function Layout() {
+export default function Layout({ onLogout }: Props) {
   const location = useLocation();
   const [logOpen, setLogOpen] = useState(false);
+  const [pwdOpen, setPwdOpen] = useState(false);
+  const [oldPwd, setOldPwd] = useState("");
+  const [newPwd, setNewPwd] = useState("");
+  const [confirmPwd, setConfirmPwd] = useState("");
+  const [pwdError, setPwdError] = useState("");
+  const [pwdOk, setPwdOk] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
     "/analysis": true,
   });
 
   function toggleExpand(key: string) {
     setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
+  }
+
+  function resetPwdForm() {
+    setOldPwd("");
+    setNewPwd("");
+    setConfirmPwd("");
+    setPwdError("");
+    setPwdOk(false);
+  }
+
+  async function handleChangePwd() {
+    setPwdError("");
+    setPwdOk(false);
+    if (!oldPwd || !newPwd) {
+      setPwdError("请填写完整");
+      return;
+    }
+    if (newPwd.length < 4) {
+      setPwdError("新密码至少4位");
+      return;
+    }
+    if (newPwd !== confirmPwd) {
+      setPwdError("两次密码输入不一致");
+      return;
+    }
+    const username = localStorage.getItem("auth_username") || "";
+    try {
+      await invoke("change_password", { username, oldPassword: oldPwd, newPassword: newPwd });
+      setPwdOk(true);
+      setOldPwd("");
+      setNewPwd("");
+      setConfirmPwd("");
+    } catch (e) {
+      setPwdError(String(e));
+    }
   }
 
   return (
@@ -186,19 +224,69 @@ export default function Layout() {
             );
           })}
         </nav>
-        <button
-          onClick={() => setLogOpen(true)}
-          className="mx-4 mb-4 flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-slate-300 hover:text-slate-500 hover:bg-slate-50 transition-colors"
-        >
-          <ScrollText className="w-3.5 h-3.5" />
-          运行日志
-        </button>
+        <div className="mx-4 mb-4 space-y-1">
+          <button
+            onClick={() => { resetPwdForm(); setPwdOpen(true); }}
+            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+          >
+            <KeyRound className="w-3.5 h-3.5" />
+            修改密码
+          </button>
+          <button
+            onClick={() => onLogout?.()}
+            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            锁定
+          </button>
+          <button
+            onClick={() => setLogOpen(true)}
+            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-slate-400 hover:text-slate-600 hover:bg-slate-50 transition-colors"
+          >
+            <ScrollText className="w-3.5 h-3.5" />
+            运行日志
+          </button>
+        </div>
       </aside>
       <main className="flex-1 overflow-auto">
         <div className="p-8 max-w-7xl mx-auto">
           <Outlet />
         </div>
       </main>
+
+      {/* Password dialog */}
+      {pwdOpen && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={() => { setPwdOpen(false); resetPwdForm(); }}>
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-6 w-full max-w-sm mx-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-base font-semibold text-slate-800">修改密码</h3>
+              <button onClick={() => { setPwdOpen(false); resetPwdForm(); }} className="p-1 hover:bg-slate-100 rounded transition-colors text-slate-400">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <input type="password" value={oldPwd} onChange={(e) => setOldPwd(e.target.value)} placeholder="原密码" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <input type="password" value={newPwd} onChange={(e) => setNewPwd(e.target.value)} placeholder="新密码" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <input type="password" value={confirmPwd} onChange={(e) => setConfirmPwd(e.target.value)} placeholder="确认新密码" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            {pwdError && (
+              <div className="mt-2 flex items-center gap-1.5 text-xs text-red-600 bg-red-50 px-2 py-1.5 rounded">
+                <AlertCircle className="w-3.5 h-3.5" /> {pwdError}
+              </div>
+            )}
+            {pwdOk && (
+              <div className="mt-2 flex items-center gap-1.5 text-xs text-emerald-600 bg-emerald-50 px-2 py-1.5 rounded">
+                <CheckCircle2 className="w-3.5 h-3.5" /> 密码修改成功
+              </div>
+            )}
+            <div className="mt-4 flex gap-2">
+              <button onClick={() => { setPwdOpen(false); resetPwdForm(); }} className="flex-1 px-3 py-2 text-sm text-slate-500 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors">取消</button>
+              <button onClick={handleChangePwd} className="flex-1 px-3 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">确认修改</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <LogModal open={logOpen} onClose={() => setLogOpen(false)} />
     </div>
   );
