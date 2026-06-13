@@ -196,15 +196,25 @@ pub fn run() {
                         .build(),
                 )?;
             }
-            // Fix: migration SQL 被修改后，tauri-plugin-sql 存储的哈希不匹配导致
-            // "migration N was previously applied but has been modified" 错误。
-            // 清理 _tauri_sql_migrations 让插件重新应用 migration 1-4（均为幂等操作），
-            // 同时把 migration 5（ALTER TABLE ADD COLUMN，非幂等）标记为已应用。
+            // 修复：migration SQL 被修改后，插件哈希校验失败的问题。
+            // 仅在 migration 追踪表不完整时执行清理，正常启动跳过。
             if let Ok(path) = get_db_path(app.handle()) {
                 if let Ok(conn) = Connection::open(&path) {
+                    let count: i64 = conn
+                        .query_row(
+                            "SELECT COUNT(*) FROM _tauri_sql_migrations",
+                            [],
+                            |row| row.get(0),
+                        )
+                        .unwrap_or(0);
+                    if count >= 5 {
+                        // 插件已记录全部 migration（1-5），哈希匹配，无需处理
+                        return Ok(());
+                    }
+                    // 清理过期哈希：删旧表 → 应用 1-4 → 标记 5 已应用
                     conn.execute_batch("DROP TABLE IF EXISTS _tauri_sql_migrations;")
                         .ok();
-                    // 确保 category_id 列存在，然后标记 migration 5 已应用
+                    // 确保 category_id 列存在（migration 5 的非幂等操作）
                     let has_col: bool = conn
                         .query_row(
                             "SELECT COUNT(*) FROM pragma_table_info('metric_definitions') WHERE name='category_id'",
@@ -218,8 +228,7 @@ pub fn run() {
                         )
                         .ok();
                     }
-                    // 重建 migration 追踪表，标记 migration 5 已应用
-                    // 这样插件重跑 1-4 后，跳过 5（列已存在，不能重跑 ALTER TABLE）
+                    // 重建追踪表，标记 migration 5 已应用，避免插件重复执行 ALTER TABLE
                     conn.execute_batch(
                         "CREATE TABLE IF NOT EXISTS _tauri_sql_migrations (
                             version INTEGER PRIMARY KEY,
