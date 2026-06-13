@@ -196,51 +196,50 @@ pub fn run() {
                         .build(),
                 )?;
             }
-            // 修复：migration SQL 被修改后，插件哈希校验失败的问题。
-            // 仅在 migration 追踪表不完整时执行清理，正常启动跳过。
+            // 每次启动重置 migration 追踪表，避免"SQL 被修改导致哈希不匹配"阻断。
+            // Migration 1-4 是幂等的（CREATE TABLE IF NOT EXISTS / 条件 UPDATE），
+            // Migration 5 (ALTER TABLE) 非幂等，在此手动处理。
             if let Ok(path) = get_db_path(app.handle()) {
                 if let Ok(conn) = Connection::open(&path) {
-                    let count: i64 = conn
-                        .query_row(
-                            "SELECT COUNT(*) FROM _tauri_sql_migrations",
-                            [],
-                            |row| row.get(0),
-                        )
-                        .unwrap_or(0);
-                    if count >= 5 {
-                        // 插件已记录全部 migration（1-5），哈希匹配，无需处理
-                        return Ok(());
-                    }
-                    // 清理过期哈希：删旧表 → 应用 1-4 → 标记 5 已应用
                     conn.execute_batch("DROP TABLE IF EXISTS _tauri_sql_migrations;")
                         .ok();
-                    // 确保 category_id 列存在（migration 5 的非幂等操作）
-                    let has_col: bool = conn
+                    // 如果 metric_definitions 表已存在，确保 category_id 列存在，
+                    // 并预标记 migration 5 为已应用，避免插件重复执行 ALTER TABLE。
+                    let table_exists: bool = conn
                         .query_row(
-                            "SELECT COUNT(*) FROM pragma_table_info('metric_definitions') WHERE name='category_id'",
+                            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='metric_definitions'",
                             [],
                             |row| row.get(0),
                         )
                         .unwrap_or(false);
-                    if !has_col {
+                    if table_exists {
+                        let has_col: bool = conn
+                            .query_row(
+                                "SELECT COUNT(*) FROM pragma_table_info('metric_definitions') WHERE name='category_id'",
+                                [],
+                                |row| row.get(0),
+                            )
+                            .unwrap_or(false);
+                        if !has_col {
+                            conn.execute_batch(
+                                "ALTER TABLE metric_definitions ADD COLUMN category_id INTEGER REFERENCES metric_categories(id);",
+                            )
+                            .ok();
+                        }
                         conn.execute_batch(
-                            "ALTER TABLE metric_definitions ADD COLUMN category_id INTEGER REFERENCES metric_categories(id);",
+                            "CREATE TABLE IF NOT EXISTS _tauri_sql_migrations (
+                                version INTEGER PRIMARY KEY,
+                                description TEXT,
+                                sql TEXT,
+                                kind TEXT
+                            );
+                            INSERT OR IGNORE INTO _tauri_sql_migrations (version, description, sql, kind)
+                            VALUES (5, 'add category_id to metric_definitions',
+                                'ALTER TABLE metric_definitions ADD COLUMN category_id INTEGER REFERENCES metric_categories(id);',
+                                'Up');",
                         )
                         .ok();
                     }
-                    // 重建追踪表，标记 migration 5 已应用，避免插件重复执行 ALTER TABLE
-                    conn.execute_batch(
-                        "CREATE TABLE IF NOT EXISTS _tauri_sql_migrations (
-                            version INTEGER PRIMARY KEY,
-                            description TEXT,
-                            sql TEXT,
-                            kind TEXT
-                        );
-                        INSERT OR IGNORE INTO _tauri_sql_migrations (version, description, sql, kind)
-                        VALUES (5, 'add category_id to metric_definitions',
-                            'ALTER TABLE metric_definitions ADD COLUMN category_id INTEGER REFERENCES metric_categories(id);',
-                            'Up');"
-                    ).ok();
                 }
             }
             Ok(())
