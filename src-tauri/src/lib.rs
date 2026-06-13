@@ -188,13 +188,36 @@ pub fn run() {
             login,
             change_password,
         ])
-        .setup(|app| {
+.setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
                         .level(log::LevelFilter::Info)
                         .build(),
                 )?;
+            }
+            // Fix stale migration checksums from modified SQL
+            if let Ok(path) = get_db_path(app.handle()) {
+                if let Ok(conn) = Connection::open(&path) {
+                    // Drop stale migration tracking so modified migrations re-apply
+                    conn.execute_batch("DROP TABLE IF EXISTS _tauri_sql_migrations;")
+                        .ok();
+                    // Migration 5 (ALTER TABLE ADD COLUMN) is not idempotent — pre-apply so
+                    // re-run of migration 5 won't fail with "duplicate column".
+                    let has_col: bool = conn
+                        .query_row(
+                            "SELECT COUNT(*) FROM pragma_table_info('metric_definitions') WHERE name='category_id'",
+                            [],
+                            |row| row.get(0),
+                        )
+                        .unwrap_or(false);
+                    if !has_col {
+                        conn.execute_batch(
+                            "ALTER TABLE metric_definitions ADD COLUMN category_id INTEGER REFERENCES metric_categories(id);",
+                        )
+                        .ok();
+                    }
+                }
             }
             Ok(())
         })
