@@ -186,6 +186,7 @@ export default function TrendChart() {
       const yoyName = `${name} [同期]`;
       const yoyEntry = yoyEntries.find(([k]) => k === yoyName);
       if (yoyEntry) {
+        series.push({
           name: yoyEntry[0], type: chartType === "area" ? "line" : chartType, data: yoyEntry[1],
           smooth: chartType !== "bar",
           symbol: chartType === "bar" ? "none" : "circle",
