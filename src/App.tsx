@@ -10,7 +10,7 @@ import MetricConfig from "./components/MetricConfig";
 import DepartmentConfig from "./components/DepartmentConfig";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Login from "./components/Login";
-import { seedMockData, seedMockDepartments } from "./lib/db";
+import { seedBuiltinData } from "./lib/db";
 import { log } from "./lib/logger";
 
 function App() {
@@ -18,10 +18,7 @@ function App() {
 
   useEffect(() => {
     if (!authed) return;
-    seedMockData().catch((e) => log.error("App", "seedMockData 失败", e));
-    seedMockDepartments().catch((e) =>
-      log.error("App", "seedMockDepartments 失败", e),
-    );
+    seedBuiltinData().catch((e) => log.error("App", "seedBuiltinData 失败", e));
   }, [authed]);
 
   if (!authed) {
