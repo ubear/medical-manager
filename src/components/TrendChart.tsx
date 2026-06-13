@@ -173,6 +173,12 @@ export default function TrendChart() {
         symbolSize: 4,
         lineStyle: { width: 2, type: "solid" },
         areaStyle: chartType === "area" ? { opacity: 0.08 } : undefined,
+        label: chartType === "bar" ? {
+          show: true,
+          position: "top",
+          fontSize: 11,
+          formatter: (p: { value: number | null }) => p.value == null ? "" : String(p.value),
+        } : undefined,
         opacity: 1,
         color: PALETTE[paletteIdx % PALETTE.length],
       });
@@ -180,13 +186,18 @@ export default function TrendChart() {
       const yoyName = `${name} [同期]`;
       const yoyEntry = yoyEntries.find(([k]) => k === yoyName);
       if (yoyEntry) {
-        series.push({
           name: yoyEntry[0], type: chartType === "area" ? "line" : chartType, data: yoyEntry[1],
           smooth: chartType !== "bar",
           symbol: chartType === "bar" ? "none" : "circle",
           symbolSize: 3,
           lineStyle: { width: 2, type: "dashed" },
           areaStyle: chartType === "area" ? { opacity: 0.03 } : undefined,
+          label: chartType === "bar" ? {
+            show: true,
+            position: "top",
+            fontSize: 11,
+            formatter: (p: { value: number | null }) => p.value == null ? "" : String(p.value),
+          } : undefined,
           opacity: 0.5,
           color: PALETTE[paletteIdx % PALETTE.length],
         });
