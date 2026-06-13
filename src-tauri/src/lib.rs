@@ -196,14 +196,15 @@ pub fn run() {
                         .build(),
                 )?;
             }
-            // Fix stale migration checksums from modified SQL
+            // Fix: migration SQL 被修改后，tauri-plugin-sql 存储的哈希不匹配导致
+            // "migration N was previously applied but has been modified" 错误。
+            // 清理 _tauri_sql_migrations 让插件重新应用 migration 1-4（均为幂等操作），
+            // 同时把 migration 5（ALTER TABLE ADD COLUMN，非幂等）标记为已应用。
             if let Ok(path) = get_db_path(app.handle()) {
                 if let Ok(conn) = Connection::open(&path) {
-                    // Drop stale migration tracking so modified migrations re-apply
                     conn.execute_batch("DROP TABLE IF EXISTS _tauri_sql_migrations;")
                         .ok();
-                    // Migration 5 (ALTER TABLE ADD COLUMN) is not idempotent — pre-apply so
-                    // re-run of migration 5 won't fail with "duplicate column".
+                    // 确保 category_id 列存在，然后标记 migration 5 已应用
                     let has_col: bool = conn
                         .query_row(
                             "SELECT COUNT(*) FROM pragma_table_info('metric_definitions') WHERE name='category_id'",
@@ -217,6 +218,20 @@ pub fn run() {
                         )
                         .ok();
                     }
+                    // 重建 migration 追踪表，标记 migration 5 已应用
+                    // 这样插件重跑 1-4 后，跳过 5（列已存在，不能重跑 ALTER TABLE）
+                    conn.execute_batch(
+                        "CREATE TABLE IF NOT EXISTS _tauri_sql_migrations (
+                            version INTEGER PRIMARY KEY,
+                            description TEXT,
+                            sql TEXT,
+                            kind TEXT
+                        );
+                        INSERT OR IGNORE INTO _tauri_sql_migrations (version, description, sql, kind)
+                        VALUES (5, 'add category_id to metric_definitions',
+                            'ALTER TABLE metric_definitions ADD COLUMN category_id INTEGER REFERENCES metric_categories(id);',
+                            'Up');"
+                    ).ok();
                 }
             }
             Ok(())
