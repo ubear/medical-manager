@@ -4,15 +4,22 @@ import {
   addDepartment,
   updateDepartment,
   deleteDepartment,
+  getDepartmentRecordSummary,
 } from "../lib/db";
 import type { Department } from "../lib/types";
 import { Plus, Trash2, Check, X, Pencil } from "lucide-react";
+import { log } from "../lib/logger";
 
 export default function DepartmentConfig() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [newName, setNewName] = useState("");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState("");
+
+  const [deleteTarget, setDeleteTarget] = useState<{
+    dept: Department;
+    summary: { total: number; metrics: { name: string; count: number }[] };
+  } | null>(null);
 
   async function load() {
     const d = await getDepartments();
@@ -47,10 +54,24 @@ export default function DepartmentConfig() {
     await load();
   }
 
-  async function handleDelete(id: number, name: string) {
-    if (!confirm(`确定删除科室「${name}」？该科室的所有数据将被删除。`)) return;
-    await deleteDepartment(id);
-    await load();
+  async function handleDeleteClick(d: Department) {
+    try {
+      const summary = await getDepartmentRecordSummary(d.id);
+      setDeleteTarget({ dept: d, summary });
+    } catch (e) {
+      log.error("DepartmentConfig", "查询关联数据失败", e);
+    }
+  }
+
+  async function handleConfirmDelete() {
+    if (!deleteTarget) return;
+    try {
+      await deleteDepartment(deleteTarget.dept.id);
+      setDeleteTarget(null);
+      await load();
+    } catch (e) {
+      log.error("DepartmentConfig", "删除科室失败", e);
+    }
   }
 
   return (
@@ -152,7 +173,7 @@ export default function DepartmentConfig() {
                         <Pencil className="w-4 h-4" />
                       </button>
                       <button
-                        onClick={() => handleDelete(d.id, d.name)}
+                        onClick={() => handleDeleteClick(d)}
                         className="p-1.5 hover:bg-red-50 rounded-lg transition-colors text-slate-400 hover:text-red-500"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -175,6 +196,54 @@ export default function DepartmentConfig() {
           </tbody>
         </table>
       </div>
+
+      {/* Delete confirmation modal */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={() => setDeleteTarget(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-[440px] max-h-[80vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 pt-6 pb-4 border-b border-slate-100">
+              <h3 className="text-lg font-semibold text-slate-800">删除科室</h3>
+            </div>
+            <div className="px-6 py-4 space-y-3">
+              <p className="text-sm text-slate-600">
+                确定删除科室 <span className="font-semibold text-slate-800">「{deleteTarget.dept.name}」</span>？
+              </p>
+              <div className="bg-slate-50 rounded-lg p-3">
+                <p className="text-sm text-slate-500 mb-2">
+                  关联数据：共 <span className="font-semibold text-slate-700">{deleteTarget.summary.total}</span> 条记录
+                </p>
+                {deleteTarget.summary.metrics.length > 0 && (
+                  <ul className="space-y-1">
+                    {deleteTarget.summary.metrics.map((m) => (
+                      <li key={m.name} className="text-sm text-slate-600 flex justify-between">
+                        <span>{m.name}</span>
+                        <span className="text-slate-400">{m.count} 条</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <p className="text-sm text-red-500 font-medium">
+                该科室及其所有关联数据将被永久删除，不可恢复！
+              </p>
+            </div>
+            <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-3">
+              <button
+                onClick={() => setDeleteTarget(null)}
+                className="px-4 py-2 text-sm text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleConfirmDelete}
+                className="px-4 py-2 text-sm text-white bg-red-500 hover:bg-red-600 rounded-lg transition-colors font-medium"
+              >
+                确认删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

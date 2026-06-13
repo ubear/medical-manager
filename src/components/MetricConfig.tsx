@@ -4,6 +4,7 @@ import {
   getCategories,
   addCustomMetric,
   deleteCustomMetric,
+  getMetricRecordSummary,
   addCategory,
   deleteCategory,
   updateMetric,
@@ -54,6 +55,11 @@ export default function MetricConfig() {
 
   const [addError, setAddError] = useState("");
 
+  const [deleteTarget, setDeleteTarget] = useState<{
+    metric: MetricDefinition;
+    summary: { total: number; departments: { name: string; count: number }[] };
+  } | null>(null);
+
   async function handleAddMetric() {
     if (!newName.trim()) return;
     setAddError("");
@@ -67,11 +73,24 @@ export default function MetricConfig() {
       setAddError("指标名称已存在，请更换名称");
     }
   }
+  async function handleDeleteClick(m: MetricDefinition) {
+    try {
+      const summary = await getMetricRecordSummary(m.id);
+      setDeleteTarget({ metric: m, summary });
+    } catch (e) {
+      log.error("MetricConfig", "查询关联数据失败", e);
+    }
+  }
 
-  async function handleDeleteMetric(id: number, name: string) {
-    if (!confirm(`确定删除指标"${name}"？该指标的所有历史数据将被永久删除。`)) return;
-    await deleteCustomMetric(id);
-    await load();
+  async function handleConfirmDelete() {
+    if (!deleteTarget) return;
+    try {
+      await deleteCustomMetric(deleteTarget.metric.id);
+      setDeleteTarget(null);
+      await load();
+    } catch (e) {
+      log.error("MetricConfig", "删除指标失败", e);
+    }
   }
 
   function handleStartEdit(m: MetricDefinition) {
@@ -288,7 +307,7 @@ export default function MetricConfig() {
                       <button onClick={() => handleStartEdit(m)} className="p-1.5 hover:bg-blue-50 rounded transition-colors text-slate-400 hover:text-blue-600" title="编辑">
                         <Pencil className="w-3.5 h-3.5" />
                       </button>
-                      <button onClick={() => handleDeleteMetric(m.id, m.name)} className="p-1.5 hover:bg-red-50 rounded transition-colors text-slate-400 hover:text-red-500" title="删除">
+                      <button onClick={() => handleDeleteClick(m)} className="p-1.5 hover:bg-red-50 rounded transition-colors text-slate-400 hover:text-red-500" title="删除">
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </td>
@@ -306,6 +325,54 @@ export default function MetricConfig() {
           </tbody>
         </table>
       </div>
+
+      {/* Delete confirmation modal */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={() => setDeleteTarget(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-[440px] max-h-[80vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 pt-6 pb-4 border-b border-slate-100">
+              <h3 className="text-lg font-semibold text-slate-800">删除指标</h3>
+            </div>
+            <div className="px-6 py-4 space-y-3">
+              <p className="text-sm text-slate-600">
+                确定删除指标 <span className="font-semibold text-slate-800">「{deleteTarget.metric.name}」</span>？
+              </p>
+              <div className="bg-slate-50 rounded-lg p-3">
+                <p className="text-sm text-slate-500 mb-2">
+                  关联数据：共 <span className="font-semibold text-slate-700">{deleteTarget.summary.total}</span> 条记录
+                </p>
+                {deleteTarget.summary.departments.length > 0 && (
+                  <ul className="space-y-1">
+                    {deleteTarget.summary.departments.map((d) => (
+                      <li key={d.name} className="text-sm text-slate-600 flex justify-between">
+                        <span>{d.name}</span>
+                        <span className="text-slate-400">{d.count} 条</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <p className="text-sm text-red-500 font-medium">
+                该指标及其所有关联数据将被永久删除，不可恢复！
+              </p>
+            </div>
+            <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-3">
+              <button
+                onClick={() => setDeleteTarget(null)}
+                className="px-4 py-2 text-sm text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleConfirmDelete}
+                className="px-4 py-2 text-sm text-white bg-red-500 hover:bg-red-600 rounded-lg transition-colors font-medium"
+              >
+                确认删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

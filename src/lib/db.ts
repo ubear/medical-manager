@@ -141,9 +141,53 @@ export async function addCustomMetric(
 export async function deleteCustomMetric(id: number): Promise<void> {
   await withLock(async () => {
     const d = await getDb();
-    await d.execute("DELETE FROM metric_definitions WHERE id = $1", [id]);
     await d.execute("DELETE FROM records WHERE metric_id = $1", [id]);
+    await d.execute("DELETE FROM metric_definitions WHERE id = $1", [id]);
   });
+}
+
+export async function getMetricRecordSummary(id: number): Promise<{
+  total: number;
+  departments: { name: string; count: number }[];
+}> {
+  return safeOp("getMetricRecordSummary", async () => {
+    const d = await getDb();
+    const rows = await d.select<
+      { department: string; cnt: number }[]
+    >(
+      "SELECT department, COUNT(*) as cnt FROM records WHERE metric_id = $1 GROUP BY department ORDER BY cnt DESC, department",
+      [id],
+    );
+    return {
+      total: rows.reduce((sum, r) => sum + r.cnt, 0),
+      departments: rows.map((r) => ({ name: r.department, count: r.cnt })),
+    };
+  }, { total: 0, departments: [] });
+}
+
+export async function getDepartmentRecordSummary(id: number): Promise<{
+  total: number;
+  metrics: { name: string; count: number }[];
+}> {
+  return safeOp("getDepartmentRecordSummary", async () => {
+    const d = await getDb();
+    const deptRows = await d.select<{ name: string }[]>(
+      "SELECT name FROM departments WHERE id = $1",
+      [id],
+    );
+    if (deptRows.length === 0) return { total: 0, metrics: [] };
+    const deptName = deptRows[0].name;
+    const rows = await d.select<
+      { metric_name: string; cnt: number }[]
+    >(
+      "SELECT m.name as metric_name, COUNT(*) as cnt FROM records r JOIN metric_definitions m ON r.metric_id = m.id WHERE r.department = $1 GROUP BY m.name ORDER BY cnt DESC, m.name",
+      [deptName],
+    );
+    return {
+      total: rows.reduce((sum, r) => sum + r.cnt, 0),
+      metrics: rows.map((r) => ({ name: r.metric_name, count: r.cnt })),
+    };
+  }, { total: 0, metrics: [] });
 }
 
 export async function updateMetric(id: number, name: string, unit: string): Promise<void> {

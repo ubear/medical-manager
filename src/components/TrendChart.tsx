@@ -51,6 +51,14 @@ const PALETTE = [
   "#ec4899", "#84cc16", "#14b8a6", "#a855f7",
 ];
 
+function lighten(hex: string, amount: number): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  const mix = (c: number) => Math.round(c + (255 - c) * amount);
+  return `#${mix(r).toString(16).padStart(2, "0")}${mix(g).toString(16).padStart(2, "0")}${mix(b).toString(16).padStart(2, "0")}`;
+}
+
 export default function TrendChart() {
   const [metrics, setMetrics] = useState<MetricDefinition[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -191,16 +199,14 @@ export default function TrendChart() {
           smooth: chartType !== "bar",
           symbol: chartType === "bar" ? "none" : "circle",
           symbolSize: 3,
-          lineStyle: { width: 2, type: "dashed" },
-          areaStyle: chartType === "area" ? { opacity: 0.03 } : undefined,
+          opacity: 1,
+          color: lighten(PALETTE[paletteIdx % PALETTE.length], 0.5),
           label: chartType === "bar" ? {
             show: true,
             position: "top",
             fontSize: 11,
             formatter: (p: { value: number | null }) => p.value == null ? "" : String(p.value),
           } : undefined,
-          opacity: 0.5,
-          color: PALETTE[paletteIdx % PALETTE.length],
         });
       }
       paletteIdx++;
